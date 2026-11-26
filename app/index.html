@@ -97,9 +97,28 @@
       .resize-handle { cursor: col-resize; background: transparent; position: relative; z-index: 5; touch-action: none; }
       .resize-handle::after { content: ""; position: absolute; inset: 0 2px; border-radius: 99px; }
       .resize-handle:hover::after, .resize-handle.dragging::after { background: var(--accent); opacity: .55; }
-      .expand-strip { display: none; align-items: center; gap: 6px; padding: 10px 14px 0; flex-wrap: wrap; }
-      #app.sidebar-collapsed .expand-strip, #app.list-collapsed .expand-strip { display: flex; }
-      .expand-strip .btn { min-height: 32px; font-size: 12.5px; }
+      /* Edge tabs: one arrow tab per panel, riding on the panel's right edge.
+         When a panel collapses, its tab moves to the window's left edge and
+         flips to an expand arrow; the two tabs stack, sidebar above list. */
+      .edge-tab { position: fixed; top: 76px; width: 22px; height: 46px; margin-left: -11px; display: flex; align-items: center; justify-content: center; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; box-shadow: var(--shadow); color: var(--muted); cursor: pointer; z-index: 45; padding: 0; }
+      .edge-tab:hover { color: var(--ink); border-color: var(--accent); }
+      .edge-tab svg { transition: transform .15s ease; }
+      #tab-sidebar { left: var(--sidebar-w); }
+      #tab-list { left: calc(var(--sidebar-w) + 6px + var(--list-w)); }
+      #app.sidebar-collapsed #tab-sidebar { left: 11px; }
+      #app.sidebar-collapsed #tab-sidebar svg { transform: scaleX(-1); }
+      #app.sidebar-collapsed #tab-list { left: var(--list-w); }
+      #app.list-collapsed #tab-list { left: calc(var(--sidebar-w) + 6px); top: 128px; }
+      #app.list-collapsed #tab-list svg { transform: scaleX(-1); }
+      #app.sidebar-collapsed.list-collapsed #tab-list { left: 11px; }
+      /* Once a library folder is connected, the sidebar footer keeps only the
+         Settings button; library management lives in Settings. */
+      .side-footer.connected #lib-status, .side-footer.connected #connect-btn { display: none; }
+      /* Folder drag-to-reorder */
+      #folder-list .side-item { cursor: grab; }
+      #folder-list .side-item.dragging { opacity: .45; }
+      #folder-list .side-item.drop-before { box-shadow: 0 -2px 0 var(--accent); }
+      #folder-list .side-item.drop-after { box-shadow: 0 2px 0 var(--accent); }
 
       /* ---------- First-run welcome ---------- */
       #welcome { position: fixed; inset: 0; z-index: 95; display: none; align-items: center; justify-content: center; background: var(--bg); padding: 24px; overflow-y: auto; }
@@ -390,6 +409,7 @@
         #app { grid-template-columns: minmax(0, 1fr) !important; }
         #sidebar, #resize-1, #listpane, #resize-2, #editorpane { grid-column: auto; }
         .resize-handle { display: none !important; }
+        .edge-tab { display: none !important; }
         #sidebar { display: none; }
         #app.show-sidebar #sidebar {
           display: flex; position: fixed; z-index: 50; top: 0; bottom: 0; left: 0;
@@ -425,22 +445,12 @@
           </div>
           <div id="folder-list"></div>
         </div>
-        <div class="side-footer">
+        <div class="side-footer" id="side-footer">
           <p class="lib-status" id="lib-status"></p>
           <button class="btn primary block" id="connect-btn"></button>
-          <div class="btn-row" id="folder-actions" hidden>
-            <button class="btn small" id="change-folder-btn">Different folder</button>
-            <button class="btn small" id="disconnect-btn">Disconnect</button>
-          </div>
           <div class="btn-row">
-            <button class="btn small" id="export-btn"></button>
-            <button class="btn small" id="import-btn"></button>
+            <button class="btn small" id="settings-btn" style="flex:1">⚙ Settings</button>
           </div>
-          <div class="btn-row">
-            <button class="btn small" id="settings-btn">⚙ Settings</button>
-            <button class="btn small" id="collapse-sidebar-btn" title="Collapse sidebar (Ctrl+B)">‹ Hide panel</button>
-          </div>
-          <button class="link-btn" id="help-btn">How syncing works</button>
         </div>
       </aside>
       <div class="resize-handle" id="resize-1" title="Drag to resize sidebar" role="separator" aria-label="Resize sidebar"></div>
@@ -455,7 +465,6 @@
               <p class="list-sub" id="view-sub"></p>
             </div>
             <button class="btn primary" id="new-script-btn" style="min-height:38px"></button>
-            <button class="icon-btn" id="collapse-list-btn" title="Collapse script list (Ctrl+Shift+B)" aria-label="Collapse script list">‹</button>
           </div>
           <div class="search-wrap">
             <span id="search-icon"></span>
@@ -488,11 +497,6 @@
 
       <!-- Editor -->
       <section id="editorpane" aria-label="Editor">
-        <div class="expand-strip" id="expand-strip">
-          <button class="btn" id="expand-sidebar-btn">☰ Library panel</button>
-          <button class="btn" id="expand-list-btn">▤ Script list</button>
-          <span style="font-size:12.5px;color:var(--muted)">Full-width writing — Ctrl+B / Ctrl+Shift+B to toggle panels</span>
-        </div>
         <div class="ed-empty" id="ed-empty">
           <h2>No script open</h2>
           <p>Pick a script from the list, or start a new one. New scripts can start blank or from your Primink and Globby formats.</p>
@@ -519,6 +523,8 @@
           </div>
         </div>
       </section>
+      <button class="edge-tab" id="tab-sidebar" title="Hide or show the library panel (Ctrl+B)" aria-label="Toggle library panel"></button>
+      <button class="edge-tab" id="tab-list" title="Hide or show the script list (Ctrl+Shift+B)" aria-label="Toggle script list"></button>
     </div>
 
     <!-- Prompter -->
@@ -662,15 +668,29 @@
         applyPromptSize();
       }
       var layoutState = { sidebarW: 248, listW: 348, sidebarCollapsed: false, listCollapsed: false };
+      var dragFolderId = null;
       function loadLayout() {
         try { var raw = localStorage.getItem(LS_LAYOUT); if (raw) layoutState = Object.assign(layoutState, JSON.parse(raw)); } catch(e) {}
         applyLayout();
       }
       function saveLayout() { try { localStorage.setItem(LS_LAYOUT, JSON.stringify(layoutState)); } catch(e) {} }
+      /* Panels may never be sized so small that their own content starts
+         wrapping or squeezing, and the editor always keeps a usable width. */
+      var PANEL_LIMITS = { sidebarW: { min: 208, max: 560 }, listW: { min: 280, max: 640 } };
+      var EDITOR_MIN_W = 400;
+      function clampPanelWidth(key, w) {
+        var lim = PANEL_LIMITS[key];
+        var otherKey = key === "sidebarW" ? "listW" : "sidebarW";
+        var otherCollapsed = key === "sidebarW" ? layoutState.listCollapsed : layoutState.sidebarCollapsed;
+        var otherW = otherCollapsed ? 0 : layoutState[otherKey];
+        var avail = window.innerWidth - 12 - otherW - EDITOR_MIN_W;
+        var max = Math.max(lim.min, Math.min(lim.max, avail));
+        return Math.round(Math.max(lim.min, Math.min(max, w)));
+      }
       function applyLayout() {
         var app = document.getElementById("app"); if (!app) return;
-        document.documentElement.style.setProperty("--sidebar-w", layoutState.sidebarW + "px");
-        document.documentElement.style.setProperty("--list-w", layoutState.listW + "px");
+        document.documentElement.style.setProperty("--sidebar-w", clampPanelWidth("sidebarW", layoutState.sidebarW) + "px");
+        document.documentElement.style.setProperty("--list-w", clampPanelWidth("listW", layoutState.listW) + "px");
         app.classList.toggle("sidebar-collapsed", !!layoutState.sidebarCollapsed);
         app.classList.toggle("list-collapsed", !!layoutState.listCollapsed);
       }
@@ -749,7 +769,7 @@
           body:
             "<p>This is your script library: every script in one place, organized in folders, with an estimated read time next to each one based on your speaking pace.</p>" +
             "<h2>Sync it between your PC and Mac</h2>" +
-            "<p>Pick any folder on this computer. Your scripts live in that folder and the app will always open it, even after you close the app. Put the folder in Google Drive only if you want the same library on two computers.</p>" + "<p>Use <strong>Choose library folder</strong> in the sidebar once. After that there is nothing to re-connect each time you open the app. Export / Import below is just a backup option.</p>" +
+            "<p>Pick any folder on this computer. Your scripts live in that folder and the app will always open it, even after you close the app. Put the folder in Google Drive only if you want the same library on two computers.</p>" + "<p>Pick your library folder once, from the welcome screen or in Settings. After that there is nothing to re-connect each time you open the app. Export / Import in Settings is just a backup option.</p>" +
             "<p>No folder connected yet? Use <strong>Export</strong> to download the whole library as one file, and <strong>Import</strong> to load it on the other computer.</p>" +
             "<h2>Writing</h2>" +
             "<p>Use the <strong>New script</strong> button and pick a starting format: blank, your Primink documentary format, or your Globby format with SHOW lines and a pinned comment jokes section. The blue SHOW button in the toolbar drops in a blue SHOW line for source clips.</p>" +
@@ -776,16 +796,17 @@
       function updateSaveStatus() {
         var el = $("#lib-status");
         var btn = $("#connect-btn");
-        var fa = $("#folder-actions");
+        var foot = $("#side-footer");
+        if (foot) foot.classList.toggle("connected", !!dirHandle);
         if (dirHandle) {
-          el.innerHTML = "Library folder: <strong>" + esc(dirName) + "</strong><br>Saved automatically. This folder will reopen every time you launch the app — no need to reconnect.";
-          btn.innerHTML = icon("folderOpen", 16) + " Library: " + esc(dirName);
-          if (fa) fa.hidden = false;
+          // Connected: the footer keeps only the Settings button. The folder
+          // name and its management live in Settings -> Library folder.
+          el.innerHTML = "";
+          btn.innerHTML = "";
         } else {
           var warn = sessionEdited ? '<br><span class="warn">Edits from this session are not in a folder yet. Choose a library folder to keep them.</span>' : "";
           el.innerHTML = "<strong>No library folder yet.</strong> Pick any folder on this computer. Your scripts live in that folder and the app will always open it, even after you close the app. Put the folder in Google Drive only if you want the same library on two computers." + warn;
           btn.innerHTML = icon("folderOpen", 16) + " Choose library folder…";
-          if (fa) fa.hidden = true;
         }
       }
 
@@ -837,7 +858,7 @@
         $("#folder-list").innerHTML = state.folders.map(function (f) {
           var count = state.scripts.filter(function (s) { return s.folderId === f.id; }).length;
           var active = state.view.type === "folder" && state.view.folderId === f.id ? " active" : "";
-          return '<button class="side-item' + active + '" data-folder="' + f.id + '">' +
+          return '<button class="side-item' + active + '" data-folder="' + f.id + '" draggable="true" title="Drag to reorder">' +
             '<span class="folder-dot" style="background:' + esc(f.color) + '"></span>' +
             '<span class="grow">' + esc(f.name) + '</span>' +
             '<span class="side-count">' + count + "</span>" +
@@ -858,6 +879,44 @@
             state.view = { type: "folder", folderId: b.getAttribute("data-folder") };
             closeSidebarMobile();
             renderAll();
+          });
+          b.addEventListener("dragstart", function (e) {
+            dragFolderId = b.getAttribute("data-folder");
+            b.classList.add("dragging");
+            try { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", dragFolderId); } catch (err) {}
+          });
+          b.addEventListener("dragend", function () {
+            dragFolderId = null;
+            document.querySelectorAll("#folder-list .side-item").forEach(function (x) { x.classList.remove("dragging", "drop-before", "drop-after"); });
+          });
+          b.addEventListener("dragover", function (e) {
+            if (!dragFolderId || b.getAttribute("data-folder") === dragFolderId) return;
+            e.preventDefault();
+            try { e.dataTransfer.dropEffect = "move"; } catch (err) {}
+            var r = b.getBoundingClientRect();
+            var before = (e.clientY - r.top) < r.height / 2;
+            b.classList.toggle("drop-before", before);
+            b.classList.toggle("drop-after", !before);
+          });
+          b.addEventListener("dragleave", function () { b.classList.remove("drop-before", "drop-after"); });
+          b.addEventListener("drop", function (e) {
+            e.preventDefault();
+            if (!dragFolderId) return;
+            var targetId = b.getAttribute("data-folder");
+            var r = b.getBoundingClientRect();
+            var before = (e.clientY - r.top) < r.height / 2;
+            var from = state.folders.findIndex(function (f) { return f.id === dragFolderId; });
+            if (from < 0) return;
+            var moved = state.folders.splice(from, 1)[0];
+            var to = state.folders.findIndex(function (f) { return f.id === targetId; });
+            if (to < 0) { state.folders.splice(from, 0, moved); return; }
+            state.folders.splice(before ? to : to + 1, 0, moved);
+            dragFolderId = null;
+            libraryDirty = true;
+            if (!dirHandle) sessionEdited = true;
+            scheduleFlush();
+            renderSidebar();
+            toast("Folder order saved.");
           });
         });
       }
@@ -1566,15 +1625,15 @@
           '<label class="flabel">Accent color</label><div class="accent-swatches">' + accentHtml + '</div>' +
           '<label class="flabel" for="set-fontsize">Editor text size — <span id="set-fontsize-val">' + (s.editorFontSize||18.5) + 'px</span></label><input type="range" id="set-fontsize" min="15" max="24" step="0.5" value="' + (s.editorFontSize||18.5) + '" />' +
           '<label class="flabel" for="set-wpm">Speaking pace (for read times)</label><select id="set-wpm">' + [120,130,140,150,160,170,180].map(function(w){ return '<option value="' + w + '"' + (Number(s.wpm)===w ? ' selected' : '') + '>' + w + ' words per minute</option>'; }).join("") + '</select>' +
-          '<label class="flabel">Library folder</label><p style="margin:0">' + (dirHandle ? 'Current folder: <strong>' + esc(dirName) + '</strong> — reopens automatically every launch.' : 'No folder chosen yet. Pick any folder on this computer; the app will always open it after that.') + '</p>' +
-          '<div class="btn-row"><button class="btn" id="set-change-folder">Use a different folder</button>' + (dirHandle ? '<button class="btn" id="set-disconnect">Disconnect</button>' : '') + '</div>' +
+          '<label class="flabel">Library folder</label><p style="margin:0">' + (dirHandle ? 'Library folder: <strong>' + esc(dirName) + '</strong><br>Saved automatically. This folder will reopen every time you launch the app — no need to reconnect.' : 'No folder chosen yet. Pick any folder on this computer; the app will always open it after that.') + '</p>' +
+          '<div class="btn-row"><button class="btn" id="set-change-folder">' + (dirHandle ? 'Use a different folder' : 'Choose library folder') + '</button>' + (dirHandle ? '<button class="btn" id="set-disconnect">Disconnect</button>' : '') + '<button class="btn" id="set-help">How syncing works</button></div>' +
           '<label class="flabel">Teleprompter defaults</label>' +
           '<label class="flabel" for="set-pspeed" style="font-weight:400">Scroll speed — <span id="set-pspeed-val">' + (s.promptSpeed||55) + '</span></label><input type="range" id="set-pspeed" min="10" max="220" value="' + (s.promptSpeed||55) + '" />' +
           '<label class="flabel" for="set-psize" style="font-weight:400">Text size — <span id="set-psize-val">' + (s.promptSize||40) + 'px</span></label><input type="range" id="set-psize" min="24" max="72" value="' + (s.promptSize||40) + '" />' +
           '<label class="flabel">Mirror mode (for prompter glass)</label><div class="seg-row" id="set-mirror-row"><button class="seg-btn' + (!s.promptMirror ? ' sel' : '') + '" data-mirror="0">Off</button><button class="seg-btn' + (s.promptMirror ? ' sel' : '') + '" data-mirror="1">On — mirrored</button></div>' +
-          '<label class="flabel">Panels</label><div class="btn-row"><button class="btn" id="set-toggle-sidebar">Toggle library panel (Ctrl+B)</button><button class="btn" id="set-toggle-list">Toggle script list (Ctrl+Shift+B)</button></div><p style="margin:4px 0 0">Drag the thin handles between panels to resize them. Widths and collapsed state are remembered.</p>' +
+          '<label class="flabel">Panels</label><div class="btn-row"><button class="btn" id="set-toggle-sidebar">Toggle library panel (Ctrl+B)</button><button class="btn" id="set-toggle-list">Toggle script list (Ctrl+Shift+B)</button></div><p style="margin:4px 0 0">Or use the arrow tabs on the panels\' right edges. Drag the thin handles between panels to resize them; panels stop before they get narrow enough to squeeze their content. Widths and collapsed state are remembered.</p>' +
           updHtml +
-          '<label class="flabel">Backup</label><div class="btn-row"><button class="btn" id="set-export">Export backup file</button></div><p style="margin:4px 0 0">Export / Import is a backup option — your main library is the folder above.</p>' +
+          '<label class="flabel">Backup</label><div class="btn-row"><button class="btn" id="set-export">Export backup file</button><button class="btn" id="set-import">Import backup file</button></div><p style="margin:4px 0 0">Export / Import is a backup option — your main library is the folder above.</p>' +
           '</div><div class="modal-actions"><button class="btn primary" id="set-done">Done</button></div></div>';
         panel.classList.add("open");
         panel.querySelector(".modal-back").addEventListener("click", closeSettings);
@@ -1591,6 +1650,8 @@
         panel.querySelector("#set-toggle-sidebar").addEventListener("click", toggleSidebar);
         panel.querySelector("#set-toggle-list").addEventListener("click", toggleList);
         panel.querySelector("#set-export").addEventListener("click", exportLibrary);
+        var si = panel.querySelector("#set-import"); if (si) si.addEventListener("click", function(){ $("#import-file").click(); });
+        var sh = panel.querySelector("#set-help"); if (sh) sh.addEventListener("click", function(){ closeSettings(); openHelpModal(); });
         var cu = panel.querySelector("#set-check-updates");
         if (cu) {
           var nb2 = nativeBridge();
@@ -1649,8 +1710,8 @@
         var h = document.getElementById(handleId); if (!h) return;
         h.addEventListener("pointerdown", function(e){
           e.preventDefault(); h.classList.add("dragging"); h.setPointerCapture(e.pointerId);
-          var startX = e.clientX; var startW = key==="sidebarW" ? layoutState.sidebarW : layoutState.listW;
-          function move(ev){ var nw = Math.max(180, Math.min(520, startW + (ev.clientX - startX))); layoutState[key]=nw; applyLayout(); }
+          var startX = e.clientX; var startW = clampPanelWidth(key, key==="sidebarW" ? layoutState.sidebarW : layoutState.listW);
+          function move(ev){ layoutState[key] = clampPanelWidth(key, startW + (ev.clientX - startX)); applyLayout(); }
           function up(){ h.classList.remove("dragging"); h.removeEventListener("pointermove", move); h.removeEventListener("pointerup", up); saveLayout(); }
           h.addEventListener("pointermove", move); h.addEventListener("pointerup", up);
         });
@@ -1672,8 +1733,8 @@
       }
       function wireChrome() {
         $("#connect-btn").innerHTML = icon("folderOpen", 16) + " Connect library folder";
-        $("#export-btn").innerHTML = icon("download", 15) + " Export";
-        $("#import-btn").innerHTML = icon("upload", 15) + " Import";
+        $("#tab-sidebar").innerHTML = icon("chevL", 15);
+        $("#tab-list").innerHTML = icon("chevL", 15);
         $("#add-folder-btn").innerHTML = icon("plus", 15);
         $("#new-script-btn").innerHTML = icon("plus", 16) + " New";
         $("#empty-new-btn").addEventListener("click", openNewScriptModal);
@@ -1688,13 +1749,9 @@
         $("#prompt-play").innerHTML = icon("pause", 17) + " Pause";
 
         $("#connect-btn").addEventListener("click", function(e){ if (e.currentTarget.dataset && e.currentTarget.dataset.reconnect === "1") return; connectFolder(); });
-        var _cf = $("#change-folder-btn"); if (_cf) _cf.addEventListener("click", connectFolder);
-        var _dc = $("#disconnect-btn"); if (_dc) _dc.addEventListener("click", disconnectFolder);
         var _sb = $("#settings-btn"); if (_sb) _sb.addEventListener("click", openSettings);
-        var _cs = $("#collapse-sidebar-btn"); if (_cs) _cs.addEventListener("click", toggleSidebar);
-        var _cl = $("#collapse-list-btn"); if (_cl) _cl.addEventListener("click", toggleList);
-        var _es = $("#expand-sidebar-btn"); if (_es) _es.addEventListener("click", function(){ layoutState.sidebarCollapsed=false; saveLayout(); applyLayout(); });
-        var _el = $("#expand-list-btn"); if (_el) _el.addEventListener("click", function(){ layoutState.listCollapsed=false; saveLayout(); applyLayout(); });
+        var _ts = $("#tab-sidebar"); if (_ts) _ts.addEventListener("click", toggleSidebar);
+        var _tl = $("#tab-list"); if (_tl) _tl.addEventListener("click", toggleList);
         var _ec = $("#empty-connect-btn"); if (_ec) _ec.addEventListener("click", connectFolder);
         var _wc = $("#welcome-create"); if (_wc) _wc.addEventListener("click", async function(){ if (await connectFolder()) hideWelcome(); });
         var _wo = $("#welcome-open"); if (_wo) _wo.addEventListener("click", async function(){ if (await connectFolder()) hideWelcome(); });
@@ -1706,13 +1763,10 @@
         });
         wireResize("resize-1", "sidebarW");
         wireResize("resize-2", "listW");
-        $("#export-btn").addEventListener("click", exportLibrary);
-        $("#import-btn").addEventListener("click", function () { $("#import-file").click(); });
         $("#import-file").addEventListener("change", function (e) {
           if (e.target.files && e.target.files[0]) importLibraryFile(e.target.files[0]);
           e.target.value = "";
         });
-        $("#help-btn").addEventListener("click", openHelpModal);
         $("#add-folder-btn").addEventListener("click", function () { openFolderModal(null); });
         $("#new-script-btn").addEventListener("click", openNewScriptModal);
         $("#open-sidebar-btn").addEventListener("click", function () {
