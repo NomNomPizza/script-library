@@ -8,7 +8,11 @@ const https = require('https');
 const crypto = require('crypto');
 const { spawn } = require('child_process');
 
-app.setName('Script Library');
+// The app was renamed to Scripture in v1.6.0. Pin the userData folder to
+// the original "Script Library" location so the rename does not orphan
+// the remembered library folder, the backup folder, or the update logs.
+app.setPath('userData', path.join(app.getPath('appData'), 'Script Library'));
+app.setName('Scripture');
 
 let mainWindow = null;
 
@@ -109,14 +113,16 @@ function buildMacInstallScript(opts) {
     'if ! ditto -x -k "$ZIP" "$TMP"; then echo "FAIL: unzip"; rm -rf "$TMP"; exit 1; fi',
     'NEWAPP=$(find "$TMP" -maxdepth 2 -name "*.app" -type d | head -1)',
     'if [ -z "$NEWAPP" ]; then echo "FAIL: no .app in the download"; rm -rf "$TMP"; exit 1; fi',
-    'BACKUP="$DEST.backup"',
+    'FINAL="$(dirname "$DEST")/$(basename "$NEWAPP")"',
+    'BACKUP="$FINAL.backup"',
     'rm -rf "$BACKUP"',
-    'if [ -e "$DEST" ]; then mv "$DEST" "$BACKUP" || { echo "FAIL: could not move the old app aside"; rm -rf "$TMP"; exit 1; }; fi',
-    'if ! mv "$NEWAPP" "$DEST"; then echo "FAIL: could not move the new app in"; [ -e "$BACKUP" ] && mv "$BACKUP" "$DEST"; rm -rf "$TMP"; exit 1; fi',
-    'xattr -dr com.apple.quarantine "$DEST" 2>/dev/null',
+    'if [ -e "$FINAL" ]; then mv "$FINAL" "$BACKUP" || { echo "FAIL: could not move the old app aside"; rm -rf "$TMP"; exit 1; }; fi',
+    'if ! mv "$NEWAPP" "$FINAL"; then echo "FAIL: could not move the new app in"; [ -e "$BACKUP" ] && mv "$BACKUP" "$FINAL"; rm -rf "$TMP"; exit 1; fi',
+    'if [ "$FINAL" != "$DEST" ] && [ -e "$DEST" ]; then rm -rf "$DEST"; echo "removed the old-named bundle"; fi',
+    'xattr -dr com.apple.quarantine "$FINAL" 2>/dev/null',
     'rm -rf "$BACKUP" "$TMP" "$ZIP"',
     'echo "installed OK"',
-    'if [ "$RELAUNCH" = "1" ]; then open "$DEST"; echo "relaunched"; fi',
+    'if [ "$RELAUNCH" = "1" ]; then open "$FINAL"; echo "relaunched"; fi',
     ''
   ].join('\n');
 }
@@ -364,7 +370,7 @@ function createWindow() {
     height: 880,
     minWidth: 860,
     minHeight: 560,
-    title: 'Script Library',
+    title: 'Scripture',
     autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -397,7 +403,7 @@ app.whenReady().then(() => {
   ipcMain.handle('dialog:pickDir', async () => {
     const remembered = readSettings().lastLibrary;
     const result = await dialog.showOpenDialog({
-      title: 'Choose your Script Library folder',
+      title: 'Choose your Scripture library folder',
       properties: ['openDirectory', 'createDirectory'],
       defaultPath: remembered && fs.existsSync(remembered) ? remembered : undefined
     });

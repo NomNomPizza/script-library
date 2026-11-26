@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="color-scheme" content="light dark" />
     <link rel="icon" href="data:," />
-    <title>Script Library</title>
+    <title>Scripture</title>
     <style>
       :root {
         color-scheme: light dark;
@@ -369,6 +369,11 @@
       }
       .tpl-card:hover { border-color: var(--accent); }
       .tpl-card.sel { border-color: var(--accent); background: var(--select-bg); }
+      .tpl-card { position: relative; }
+      .tpl-del { position: absolute; top: 6px; right: 6px; display: inline-flex; padding: 4px; border-radius: 6px; color: var(--muted); }
+      .tpl-del:hover { color: var(--danger, #e0533d); background: var(--hover-bg); }
+      .script-row.dragging { opacity: .45; }
+      .side-item.drop-target { background: var(--select-bg); box-shadow: inset 0 0 0 2px var(--accent); }
       .tpl-card .tt { font-size: 15px; font-weight: 650; display: block; }
       .tpl-card .td { font-size: 13px; color: var(--muted); display: block; margin-top: 2px; line-height: 1.45; }
       .swatches { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 2px; }
@@ -501,6 +506,7 @@
               <button class="icon-btn" id="fav-btn" aria-label="Toggle favorite"></button>
               <button class="icon-btn" id="dup-btn" aria-label="Duplicate script"></button>
               <button class="icon-btn" id="del-btn" aria-label="Delete script"></button>
+              <button class="icon-btn" id="tpl-btn" aria-label="Save as template" title="Save as template"></button>
               <button class="btn primary" id="prompt-btn" style="min-height:38px"></button>
             </div>
             <div id="ed-title" contenteditable="true" spellcheck="true" role="textbox" aria-label="Script title"></div>
@@ -539,7 +545,7 @@
     <div id="toast" role="status"></div>
     <div id="welcome" role="dialog" aria-modal="true" aria-label="Set up your library">
       <div class="welcome-card">
-        <h1>Script Library</h1>
+        <h1>Scripture</h1>
         <p class="sub">Your scripts live in one library folder on this computer. Set it up once and the app reopens it automatically from then on. Put the folder inside Google Drive if you want the same library on your PC and your Mac.</p>
         <button class="welcome-choice" id="welcome-create">
           <strong>Create a new library</strong>
@@ -559,6 +565,7 @@
       /* ================= Icons (inline SVG, stroke style) ================= */
       var ICONS = {
         doc: '<path d="M6 2.5h8L19 7.5v14H6z"/><path d="M13.5 2.5v5.5H19"/><path d="M9 12.5h6M9 16h6"/>',
+        template: '<path d="M6 2.5h8L19 7.5v14H6z"/><path d="M13.5 2.5v5.5H19"/><path d="M12 11v7M8.5 14.5h7"/>',
         clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.2 2"/>',
         star: '<path d="M12 3.4l2.6 5.3 5.8.8-4.2 4.1 1 5.8L12 16.7l-5.2 2.7 1-5.8L3.6 9.5l5.8-.8z"/>',
         starFill: '<path fill="currentColor" stroke="none" d="M12 3.4l2.6 5.3 5.8.8-4.2 4.1 1 5.8L12 16.7l-5.2 2.7 1-5.8L3.6 9.5l5.8-.8z"/>',
@@ -593,6 +600,7 @@
       var state = {
         folders: [],
         scripts: [],
+        templates: [],
         settings: { wpm: 150, theme: "light", accent: "#b83a5e", editorFontSize: 18.5, promptSpeed: 55, promptSize: 40, promptMirror: false },
         view: { type: "all", folderId: null },
         selectedId: null,
@@ -658,6 +666,7 @@
       }
       var layoutState = { sidebarW: 248, listW: 348, sidebarCollapsed: false, listCollapsed: false };
       var dragFolderId = null;
+      var dragScriptId = null;
       function loadLayout() {
         try { var raw = localStorage.getItem(LS_LAYOUT); if (raw) layoutState = Object.assign(layoutState, JSON.parse(raw)); } catch(e) {}
         applyLayout();
@@ -750,7 +759,7 @@
         var now = Date.now();
         state.scripts = [{
           id: uid(),
-          title: "Welcome to your Script Library",
+          title: "Welcome to Scripture",
           folderId: null,
           favorite: true,
           createdAt: now,
@@ -761,7 +770,7 @@
             "<p>Pick any folder on this computer. Your scripts live in that folder and the app will always open it, even after you close the app. Put the folder in Google Drive only if you want the same library on two computers.</p>" + "<p>Pick your library folder once, from the welcome screen or in Settings. After that there is nothing to re-connect each time you open the app. Export / Import in Settings is just a backup option.</p>" +
             "<p>No folder connected yet? Use <strong>Export</strong> to download the whole library as one file, and <strong>Import</strong> to load it on the other computer.</p>" +
             "<h2>Writing</h2>" +
-            "<p>Use the <strong>New script</strong> button and pick a starting format: blank, your Primink documentary format, or your Globby format with SHOW lines and a pinned comment jokes section. The blue SHOW button in the toolbar drops in a blue SHOW line for source clips.</p>" +
+            "<p>Use the <strong>New script</strong> button to start a blank script. If you find a layout you reuse, open it and hit the template button in the editor to save it as a template; new scripts can then start from it. The blue SHOW button in the toolbar drops in a blue SHOW line for source clips.</p>" +
             "<h2>Recording</h2>" +
             "<p>Open a script and hit <strong>Prompter</strong> to read it full-screen with auto-scroll. Set the speed and text size once and it stays comfortable.</p>" +
             "<p>Delete this script whenever you're ready. It's just a tour.</p>"
@@ -876,9 +885,15 @@
           });
           b.addEventListener("dragend", function () {
             dragFolderId = null;
-            document.querySelectorAll("#folder-list .side-item").forEach(function (x) { x.classList.remove("dragging", "drop-before", "drop-after"); });
+            document.querySelectorAll("#folder-list .side-item").forEach(function (x) { x.classList.remove("dragging", "drop-before", "drop-after", "drop-target"); });
           });
           b.addEventListener("dragover", function (e) {
+            if (dragScriptId) {
+              e.preventDefault();
+              try { e.dataTransfer.dropEffect = "move"; } catch (err) {}
+              b.classList.add("drop-target");
+              return;
+            }
             if (!dragFolderId || b.getAttribute("data-folder") === dragFolderId) return;
             e.preventDefault();
             try { e.dataTransfer.dropEffect = "move"; } catch (err) {}
@@ -887,9 +902,23 @@
             b.classList.toggle("drop-before", before);
             b.classList.toggle("drop-after", !before);
           });
-          b.addEventListener("dragleave", function () { b.classList.remove("drop-before", "drop-after"); });
+          b.addEventListener("dragleave", function () { b.classList.remove("drop-before", "drop-after", "drop-target"); });
           b.addEventListener("drop", function (e) {
             e.preventDefault();
+            b.classList.remove("drop-target");
+            if (dragScriptId) {
+              var dragged = scriptById(dragScriptId);
+              var targetFolder = folderById(b.getAttribute("data-folder"));
+              dragScriptId = null;
+              if (dragged && targetFolder && dragged.folderId !== targetFolder.id) {
+                dragged.folderId = targetFolder.id;
+                dragged.updatedAt = Date.now();
+                markDirty(dragged.id);
+                renderAll();
+                toast("Moved \u201C" + (dragged.title || "Untitled script") + "\u201D to " + targetFolder.name + ".");
+              }
+              return;
+            }
             if (!dragFolderId) return;
             var targetId = b.getAttribute("data-folder");
             var r = b.getBoundingClientRect();
@@ -932,7 +961,7 @@
         $("#script-list").innerHTML = list.map(function (s) {
           var f = folderById(s.folderId);
           var words = scriptWords(s);
-          return '<button class="script-row' + (s.id === state.selectedId ? " active" : "") + '" data-id="' + s.id + '" role="option" aria-selected="' + (s.id === state.selectedId) + '">' +
+          return '<button class="script-row' + (s.id === state.selectedId ? " active" : "") + '" data-id="' + s.id + '" draggable="true" title="Drag onto a folder to move it" role="option" aria-selected="' + (s.id === state.selectedId) + '">' +
             '<span class="t">' + esc(s.title || "Untitled script") + "</span>" +
             '<span class="m">' + (s.favorite ? '<span class="star">' + icon("starFill", 12) + "</span>" : "") +
             fmtReadTime(words) + " · " + fmtDateLabel(s.updatedAt) + " · " + esc(f ? f.name : "Unfiled") + "</span></button>";
@@ -940,6 +969,16 @@
         document.querySelectorAll(".script-row").forEach(function (row) {
           row.addEventListener("click", function () {
             selectScript(row.getAttribute("data-id"), true);
+          });
+          row.addEventListener("dragstart", function (e) {
+            dragScriptId = row.getAttribute("data-id");
+            row.classList.add("dragging");
+            try { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", "script:" + dragScriptId); } catch (err) {}
+          });
+          row.addEventListener("dragend", function () {
+            dragScriptId = null;
+            document.querySelectorAll(".script-row").forEach(function (x) { x.classList.remove("dragging"); });
+            document.querySelectorAll("#folder-list .side-item").forEach(function (x) { x.classList.remove("drop-target"); });
           });
         });
       }
@@ -1049,19 +1088,31 @@
       }
 
       /* ================= Templates ================= */
-      function priminkTemplate() {
-        return "<h2>Title options</h2><p>1. </p><p>2. </p><p>3. </p>" +
-          "<h2>Thumbnail text options</h2><p>1. </p><p>2. </p><p>3. </p>" +
-          "<h2>Brief description</h2><p></p>" +
-          "<h2>Used media links</h2><p></p>" +
-          "<h2>Script</h2><p></p>";
+      /* ---- user templates: save any script's body as a reusable starter ---- */
+      function saveScriptAsTemplate(script) {
+        if (!script) return;
+        openModal(
+          "<h2>Save as template</h2><p>The current contents of \u201C" + esc(script.title || "Untitled script") + "\u201D become a template. New scripts can then start from it; the template itself never changes unless you delete it and save a new one.</p>" +
+          '<label class="flabel" for="tpl-name">Template name</label><input type="text" id="tpl-name" value="' + esc((script.title || "Untitled script") + " template") + '" />',
+          [
+            { label: "Cancel" },
+            { label: "Save template", primary: true, onClick: function () {
+                var name = $("#tpl-name").value.trim() || "Untitled template";
+                state.templates.push({ id: uid(), name: name, body: script.body, createdAt: Date.now() });
+                libraryDirty = true;
+                if (!dirHandle) sessionEdited = true;
+                scheduleFlush();
+                toast("Template saved. It will be offered when you create a new script.");
+              } }
+          ]
+        );
+        setTimeout(function () { var i = $("#tpl-name"); if (i) { i.focus(); i.select(); } }, 60);
       }
-      function globbyTemplate() {
-        return "<h2>Title options</h2><p>1. </p><p>2. </p><p>3. </p>" +
-          "<h2>Thumbnail text options</h2><p>1. </p><p>2. </p><p>3. </p>" +
-          "<h2>Script</h2><p></p>" +
-          '<p class="show-line">SHOW: </p><p></p>' +
-          "<h2>Pinned comment jokes</h2><p>1. </p><p>2. </p><p>3. </p>";
+      function deleteTemplate(id) {
+        state.templates = state.templates.filter(function (t) { return t.id !== id; });
+        libraryDirty = true;
+        if (!dirHandle) sessionEdited = true;
+        scheduleFlush();
       }
 
       /* ================= Editor wiring ================= */
@@ -1194,6 +1245,10 @@
           renderAll();
         });
         $("#dup-btn").addEventListener("click", function () { duplicateScript(state.selectedId); });
+        $("#tpl-btn").addEventListener("click", function () {
+          var s = scriptById(state.selectedId);
+          if (s) { syncBodyFromEditor(); saveScriptAsTemplate(s); }
+        });
         $("#del-btn").addEventListener("click", function () {
           var s = scriptById(state.selectedId);
           if (s) openConfirmModal("Delete this script?", "“" + (s.title || "Untitled script") + "” will be removed from the library" + (dirHandle ? " and its file deleted from the library folder" : "") + ". This can't be undone.", "Delete", function () { deleteScript(s.id); });
@@ -1220,7 +1275,7 @@
       function libraryIndexJSON() {
         return JSON.stringify({
           app: "script-library", version: 1, updatedAt: Date.now(),
-          folders: state.folders, settings: state.settings,
+          folders: state.folders, settings: state.settings, templates: state.templates,
           scriptIds: state.scripts.map(function (s) { return s.id; })
         }, null, 2);
       }
@@ -1326,6 +1381,7 @@
           }
         }
         state.folders = folders;
+        state.templates = (index && index.templates) || [];
         state.settings = settings;
         state.scripts = scripts;
         state.view = { type: "all", folderId: null };
@@ -1415,7 +1471,7 @@
       function exportLibrary() {
         var payload = {
           app: "script-library", version: 1, exportedAt: Date.now(),
-          folders: state.folders, settings: state.settings, scripts: state.scripts
+          folders: state.folders, settings: state.settings, templates: state.templates, scripts: state.scripts
         };
         var blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
         var url = URL.createObjectURL(blob);
@@ -1436,9 +1492,10 @@
         reader.onload = function () {
           var data;
           try { data = JSON.parse(String(reader.result)); } catch (e) { toast("That file isn't a valid library file."); return; }
-          if (!data || !Array.isArray(data.scripts)) { toast("That file doesn't look like a Script Library export."); return; }
+          if (!data || !Array.isArray(data.scripts)) { toast("That file doesn't look like a Scripture export."); return; }
           var apply = function () {
             state.folders = Array.isArray(data.folders) ? data.folders : [];
+            state.templates = Array.isArray(data.templates) ? data.templates : [];
             state.settings = data.settings || { wpm: 150 };
             state.scripts = data.scripts.map(function (s) {
               return {
@@ -1582,18 +1639,23 @@
         );
       }
       function openNewScriptModal() {
-        var selTpl = "blank";
+        var selTpl = "";   // "" = blank; otherwise a user template id
         var folderOpts = '<option value="">Unfiled</option>' + state.folders.map(function (f) {
           var sel = (state.view.type === "folder" && state.view.folderId === f.id) ? " selected" : "";
           return '<option value="' + f.id + '"' + sel + ">" + esc(f.name) + "</option>";
         }).join("");
+        var tplHtml = "";
+        if (state.templates.length) {
+          tplHtml = '<label class="flabel">Start from</label><div class="tpl-grid">' +
+            '<button class="tpl-card sel" data-tpl=""><span class="tt">Blank</span><span class="td">An empty page, ready to write.</span></button>' +
+            state.templates.map(function (t) {
+              return '<button class="tpl-card" data-tpl="' + t.id + '"><span class="tt">' + esc(t.name) + '</span><span class="td">Your saved template</span><span class="tpl-del" data-del-tpl="' + t.id + '" role="button" aria-label="Delete template ' + esc(t.name) + '" title="Delete this template">' + icon("x", 13) + "</span></button>";
+            }).join("") +
+            "</div>";
+        }
         openModal(
-          "<h2>New script</h2><p>Pick a starting format. You can change everything after it's created.</p>" +
-          '<div class="tpl-grid">' +
-          '<button class="tpl-card sel" data-tpl="blank"><span class="tt">Blank</span><span class="td">An empty page, ready to write.</span></button>' +
-          '<button class="tpl-card" data-tpl="primink"><span class="tt">Primink documentary</span><span class="td">Title options, thumbnail text, brief description, used media links, then the script.</span></button>' +
-          '<button class="tpl-card" data-tpl="globby"><span class="tt">Globby video</span><span class="td">Title and thumbnail options, the script with a SHOW line started, and a pinned comment jokes section.</span></button>' +
-          "</div>" +
+          "<h2>New script</h2><p>Starts as a blank page" + (state.templates.length ? ", or from one of your templates" : "") + ". You can change everything after it's created.</p>" +
+          tplHtml +
           '<label class="flabel" for="ns-title">Title</label><input type="text" id="ns-title" placeholder="Untitled script" />' +
           '<label class="flabel" for="ns-folder">Folder</label><select id="ns-folder">' + folderOpts + "</select>",
           [
@@ -1601,7 +1663,8 @@
             { label: "Create script", primary: true, onClick: function () {
                 var title = $("#ns-title").value.trim();
                 var folderId = $("#ns-folder").value || null;
-                var body = selTpl === "primink" ? priminkTemplate() : selTpl === "globby" ? globbyTemplate() : "<p></p>";
+                var tpl = state.templates.find(function (t) { return t.id === selTpl; });
+                var body = tpl ? tpl.body : "<p></p>";
                 var s = createScript(title, folderId, body);
                 renderAll();
                 setTimeout(function () { $("#ed-body").focus(); }, 60);
@@ -1610,10 +1673,19 @@
           ]
         );
         document.querySelectorAll(".tpl-card").forEach(function (c) {
-          c.addEventListener("click", function () {
+          c.addEventListener("click", function (e) {
+            var del = e.target.closest("[data-del-tpl]");
+            if (del) {
+              e.stopPropagation();
+              deleteTemplate(del.getAttribute("data-del-tpl"));
+              if (selTpl === del.getAttribute("data-del-tpl")) selTpl = "";
+              c.remove();
+              toast("Template deleted.");
+              return;
+            }
             document.querySelectorAll(".tpl-card").forEach(function (x) { x.classList.remove("sel"); });
             c.classList.add("sel");
-            selTpl = c.getAttribute("data-tpl");
+            selTpl = c.getAttribute("data-tpl") || "";
           });
         });
       }
@@ -1670,7 +1742,7 @@
           "<h2>How syncing works</h2>" +
           "<p>Pick any folder on this computer. Your scripts live in that folder and the app will always open it, even after you close the app. Put the folder in Google Drive only if you want the same library on two computers.</p><p>Your library is a folder of plain files: a <strong>library.json</strong> index plus one small file per script in a <strong>scripts</strong> subfolder.</p>" +
           '<ol class="help-steps">' +
-          "<li><strong>Local (simplest):</strong> make any folder, e.g. Documents / Script Library, and pick it once. Done — it reopens automatically forever.</li>" + "<li><strong>Two computers (optional):</strong> put that folder inside Google Drive instead, and pick the same folder on the other computer.</li>" +
+          "<li><strong>Local (simplest):</strong> make any folder, e.g. Documents / Scripture, and pick it once. Done — it reopens automatically forever.</li>" + "<li><strong>Two computers (optional):</strong> put that folder inside Google Drive instead, and pick the same folder on the other computer.</li>" +
           "<li>On this computer, hit <strong>Connect library folder</strong> and pick that folder. Edits now save into it automatically as you write.</li>" +
           "<li>On your other computer, open this app, hit <strong>Connect library folder</strong>, and pick the same synced folder. Your whole library loads.</li>" +
           "<li>Write on whichever machine you like. Just let Drive finish syncing before switching, so the newest files land first.</li>" +
@@ -1878,6 +1950,7 @@
         $("#dup-btn").innerHTML = icon("copy", 17);
         $("#dup-btn").title = "Duplicate script";
         $("#del-btn").innerHTML = icon("trash", 17);
+        $("#tpl-btn").innerHTML = icon("template", 17);
         $("#del-btn").title = "Delete script";
         $("#prompt-btn").innerHTML = icon("play", 15) + " Prompter";
         $("#prompt-play").innerHTML = icon("pause", 17) + " Pause";

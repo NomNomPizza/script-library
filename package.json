@@ -24,7 +24,7 @@
       "createStartMenuShortcut": true,
       "oneClick": false
     },
-    "productName": "Script Library",
+    "productName": "Scripture",
     "publish": [
       {
         "owner": "NomNomPizza",
@@ -56,5 +56,5 @@
     "release": "electron-builder -mw --publish always",
     "start": "electron ."
   },
-  "version": "1.5.0"
+  "version": "1.6.0"
 }
