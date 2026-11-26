@@ -1,0 +1,1731 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="light dark" />
+    <link rel="icon" href="data:," />
+    <title>Script Library</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --bg: #eceae7;
+        --sidebar-bg: #f3f1ee;
+        --list-bg: #faf9f7;
+        --editor-bg: #ffffff;
+        --surface: #ffffff;
+        --ink: #1d1b19;
+        --ink-2: #4c4741;
+        --muted: #857e75;
+        --line: #e0dcd6;
+        --line-soft: #eae7e2;
+        --accent: #b83a5e;
+        --accent-ink: #9c2b4d;
+        --select-bg: #f6dce6;
+        --hover-bg: #efece8;
+        --chip-bg: #efece8;
+        --show-blue: #1d4ed8;
+        --ok: #2e7d46;
+        --warn: #a15c07;
+        --danger: #b3352c;
+        --shadow: 0 12px 40px rgba(30, 20, 15, 0.18);
+        --ui-font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        --editor-font: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, "Times New Roman", serif;
+        --editor-size: 18.5px;
+        --sidebar-w: 248px;
+        --list-w: 348px;
+      }
+      :root[data-theme="dark"] {
+        --bg: #171412;
+        --sidebar-bg: #1f1c19;
+        --list-bg: #1c1917;
+        --editor-bg: #211e1b;
+        --surface: #2a2622;
+        --ink: #f2ede8;
+        --ink-2: #d6cfc7;
+        --muted: #a89e93;
+        --line: #3a352f;
+        --line-soft: #322e2a;
+        --select-bg: #3d2430;
+        --hover-bg: #2e2a26;
+        --chip-bg: #2e2a26;
+        --show-blue: #7aa5ff;
+        --shadow: 0 12px 40px rgba(0,0,0,0.5);
+      }
+      @media (prefers-color-scheme: dark) {
+        :root[data-theme="system"] {
+          --bg: #171412; --sidebar-bg: #1f1c19; --list-bg: #1c1917; --editor-bg: #211e1b; --surface: #2a2622;
+          --ink: #f2ede8; --ink-2: #d6cfc7; --muted: #a89e93; --line: #3a352f; --line-soft: #322e2a;
+          --select-bg: #3d2430; --hover-bg: #2e2a26; --chip-bg: #2e2a26; --show-blue: #7aa5ff;
+        }
+      }
+      * { box-sizing: border-box; }
+      html, body { height: 100%; }
+      body {
+        margin: 0;
+        font-family: var(--ui-font);
+        color: var(--ink);
+        background: var(--bg);
+        -webkit-font-smoothing: antialiased;
+        overflow: hidden;
+      }
+      button, [role="button"], select, input, textarea { font-family: inherit; }
+      button { cursor: pointer; }
+      :focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+      /* ---------- App frame ---------- */
+      #app {
+        display: grid;
+        grid-template-columns: var(--sidebar-w) 6px var(--list-w) 6px minmax(0, 1fr);
+        height: 100dvh;
+      }
+      #app.sidebar-collapsed { grid-template-columns: 0 0 var(--list-w) 6px minmax(0, 1fr); }
+      #app.sidebar-collapsed #sidebar { display: none; }
+      #app.sidebar-collapsed #resize-1 { display: none; }
+      #app.list-collapsed { grid-template-columns: var(--sidebar-w) 6px 0 0 minmax(0, 1fr); }
+      #app.list-collapsed #listpane { display: none; }
+      #app.list-collapsed #resize-2 { display: none; }
+      #app.sidebar-collapsed.list-collapsed { grid-template-columns: 0 0 0 0 minmax(0, 1fr); }
+      .resize-handle { cursor: col-resize; background: transparent; position: relative; z-index: 5; touch-action: none; }
+      .resize-handle::after { content: ""; position: absolute; inset: 0 2px; border-radius: 99px; }
+      .resize-handle:hover::after, .resize-handle.dragging::after { background: var(--accent); opacity: .55; }
+      .expand-strip { display: none; align-items: center; gap: 6px; padding: 10px 14px 0; flex-wrap: wrap; }
+      #app.sidebar-collapsed .expand-strip, #app.list-collapsed .expand-strip { display: flex; }
+      .expand-strip .btn { min-height: 32px; font-size: 12.5px; }
+
+      /* ---------- Sidebar ---------- */
+      #sidebar {
+        background: var(--sidebar-bg);
+        border-right: 1px solid var(--line);
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+      }
+      .side-scroll { overflow-y: auto; padding: 14px 10px 8px; flex: 1; min-height: 0; }
+      .side-label {
+        font-size: 11px; font-weight: 600; letter-spacing: 0.06em;
+        text-transform: uppercase; color: var(--muted);
+        padding: 10px 10px 6px; display: flex; align-items: center; justify-content: space-between;
+      }
+      .side-item {
+        display: flex; align-items: center; gap: 9px;
+        width: 100%; min-height: 38px; padding: 6px 10px;
+        border: 0; border-radius: 9px; background: transparent;
+        color: var(--ink); font-size: 14px; text-align: left;
+      }
+      .side-item:hover { background: var(--hover-bg); }
+      .side-item.active { background: var(--select-bg); }
+      .side-item svg { flex: none; color: var(--ink-2); }
+      .side-item .grow { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .side-count { font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+      .folder-dot { width: 11px; height: 11px; border-radius: 3.5px; flex: none; }
+      .side-add {
+        display: inline-flex; align-items: center; justify-content: center;
+        width: 26px; height: 26px; min-height: 26px; border: 0; border-radius: 7px;
+        background: transparent; color: var(--muted);
+      }
+      .side-add:hover { background: var(--hover-bg); color: var(--ink); }
+      .folder-edit-btn {
+        display: none; align-items: center; justify-content: center;
+        width: 26px; height: 26px; min-height: 26px; border: 0; border-radius: 7px;
+        background: transparent; color: var(--muted); flex: none;
+      }
+      .side-item:hover .folder-edit-btn { display: inline-flex; }
+      .folder-edit-btn:hover { background: rgba(0,0,0,0.07); color: var(--ink); }
+
+      .side-footer {
+        border-top: 1px solid var(--line);
+        padding: 12px 12px 14px;
+        background: var(--sidebar-bg);
+      }
+      .lib-status { font-size: 12.5px; line-height: 1.45; color: var(--ink-2); margin: 0 0 9px; }
+      .lib-status strong { color: var(--ink); font-weight: 600; }
+      .lib-status .warn { color: var(--warn); }
+      .btn {
+        display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+        min-height: 38px; padding: 7px 14px;
+        border: 1px solid var(--line); border-radius: 9px;
+        background: var(--surface); color: var(--ink); font-size: 13.5px; font-weight: 500;
+      }
+      .btn:hover { background: var(--hover-bg); }
+      .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+      .btn.primary:hover { background: var(--accent-ink); }
+      .btn.danger { color: var(--danger); border-color: #e5c4c1; }
+      .btn.danger:hover { background: #faf0ef; }
+      .btn.block { width: 100%; }
+      .btn.small { min-height: 34px; padding: 5px 10px; font-size: 12.5px; border-radius: 8px; }
+      .btn-row { display: flex; gap: 7px; margin-top: 7px; }
+      .btn-row .btn { flex: 1; }
+      .link-btn {
+        border: 0; background: transparent; color: var(--accent-ink);
+        font-size: 12.5px; padding: 6px 2px; min-height: 32px; text-align: left;
+      }
+      .link-btn:hover { text-decoration: underline; }
+
+      /* ---------- Script list pane ---------- */
+      #listpane {
+        background: var(--list-bg);
+        border-right: 1px solid var(--line);
+        display: flex; flex-direction: column; min-height: 0; min-width: 0;
+      }
+      .list-head { padding: 16px 16px 10px; }
+      .list-title-row { display: flex; align-items: flex-start; gap: 8px; }
+      .list-title { font-size: 21px; font-weight: 700; letter-spacing: -0.01em; margin: 0; flex: 1; min-width: 0; }
+      .list-sub { font-size: 12.5px; color: var(--muted); margin: 2px 0 0; }
+      .icon-btn {
+        display: inline-flex; align-items: center; justify-content: center;
+        width: 38px; height: 38px; min-height: 38px; border-radius: 10px;
+        border: 1px solid var(--line); background: var(--surface); color: var(--ink-2); flex: none;
+      }
+      .icon-btn:hover { background: var(--hover-bg); color: var(--ink); }
+      .icon-btn.on { color: var(--accent); border-color: #eec7d4; background: var(--select-bg); }
+      .search-wrap { position: relative; margin-top: 12px; }
+      .search-wrap svg { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: var(--muted); pointer-events: none; }
+      #search {
+        width: 100%; min-height: 38px; padding: 8px 12px 8px 34px;
+        border: 1px solid var(--line); border-radius: 9px; background: var(--surface);
+        font-size: 14px; color: var(--ink);
+      }
+      #search::placeholder { color: var(--muted); }
+      .list-tools { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+      .list-tools select {
+        min-height: 34px; border: 1px solid var(--line); border-radius: 8px;
+        background: var(--surface); font-size: 12.5px; color: var(--ink-2); padding: 4px 6px; max-width: 150px;
+      }
+      .list-tools .spacer { flex: 1; }
+      #script-list { overflow-y: auto; flex: 1; min-height: 0; padding: 2px 10px 14px; }
+      .script-row {
+        display: block; width: 100%; text-align: left;
+        border: 0; background: transparent; border-radius: 11px;
+        padding: 10px 12px; margin: 1px 0; color: var(--ink);
+      }
+      .script-row:hover { background: var(--hover-bg); }
+      .script-row.active { background: var(--select-bg); }
+      .script-row .t {
+        font-size: 15px; font-weight: 600; line-height: 1.3;
+        display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+      }
+      .script-row .m {
+        font-size: 12.5px; color: var(--muted); margin-top: 3px;
+        display: flex; align-items: center; gap: 5px; font-variant-numeric: tabular-nums;
+      }
+      .script-row .m .star { color: var(--accent); display: inline-flex; }
+      .list-empty { padding: 34px 22px; text-align: center; color: var(--muted); font-size: 14px; line-height: 1.55; }
+      .list-empty .btn { margin-top: 12px; }
+
+      /* ---------- Editor pane ---------- */
+      #editorpane { background: var(--editor-bg); display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+      .ed-head { padding: 18px 34px 0; max-width: 860px; width: 100%; margin: 0 auto; }
+      .ed-toprow { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+      .ed-toprow .spacer { flex: 1; }
+      #ed-title {
+        font-family: var(--editor-font);
+        font-size: 31px; font-weight: 700; line-height: 1.2; letter-spacing: -0.01em;
+        border: 0; outline: none; padding: 2px 0; min-height: 40px; color: var(--ink);
+      }
+      #ed-title:empty::before { content: "Untitled script"; color: var(--muted); }
+      .ed-meta {
+        display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px;
+        font-size: 12.5px; color: var(--muted); padding: 6px 0 12px;
+        border-bottom: 1px solid var(--line-soft); font-variant-numeric: tabular-nums;
+      }
+      .ed-meta select {
+        min-height: 30px; border: 1px solid var(--line); border-radius: 7px;
+        background: var(--surface); font-size: 12.5px; color: var(--ink-2); padding: 3px 5px;
+      }
+      .ed-meta .rt { color: var(--ink-2); font-weight: 600; }
+      .toolbar {
+        display: flex; flex-wrap: wrap; align-items: center; gap: 3px;
+        padding: 8px 0; border-bottom: 1px solid var(--line-soft);
+      }
+      .tool-btn {
+        display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+        min-width: 36px; height: 36px; min-height: 36px; padding: 0 8px;
+        border: 0; border-radius: 8px; background: transparent; color: var(--ink-2);
+        font-size: 13.5px;
+      }
+      .tool-btn:hover { background: var(--hover-bg); color: var(--ink); }
+      .tool-btn.wide { font-size: 12.5px; font-weight: 600; color: var(--show-blue); }
+      .tool-sep { width: 1px; height: 22px; background: var(--line); margin: 0 5px; flex: none; }
+      .ed-scroll { overflow-y: auto; flex: 1; min-height: 0; }
+      #ed-body {
+        max-width: 860px; margin: 0 auto; padding: 20px 34px 120px;
+        font-family: var(--editor-font); font-size: var(--editor-size); line-height: 1.62; color: var(--ink);
+        outline: none; min-height: 50vh;
+      }
+      #ed-body:empty::before { content: "Start writing…"; color: var(--muted); }
+      #ed-body h1 { font-size: 27px; line-height: 1.25; margin: 26px 0 10px; }
+      #ed-body h2 { font-size: 22px; line-height: 1.3; margin: 24px 0 8px; }
+      #ed-body p { margin: 0 0 14px; }
+      #ed-body ul, #ed-body ol { margin: 0 0 14px; padding-left: 26px; }
+      #ed-body li { margin-bottom: 5px; }
+      #ed-body .show-line { color: var(--show-blue); }
+      #ed-body a { color: var(--show-blue); }
+      .ed-empty {
+        flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+        gap: 8px; color: var(--muted); text-align: center; padding: 30px;
+      }
+      .ed-empty h2 { color: var(--ink-2); font-size: 19px; margin: 0; font-weight: 600; }
+      .ed-empty p { margin: 0; font-size: 14px; line-height: 1.55; max-width: 380px; }
+      .mobile-only { display: none !important; }
+
+      /* ---------- Prompter ---------- */
+      #prompter {
+        position: fixed; inset: 0; z-index: 60; background: #101010; color: #f5f2ee;
+        display: flex; flex-direction: column;
+      }
+      #prompter[hidden] { display: none; }
+      #prompt-scroll { flex: 1; overflow-y: auto; scrollbar-width: none; }
+      #prompt-scroll::-webkit-scrollbar { display: none; }
+      #prompt-text {
+        max-width: 900px; margin: 0 auto; padding: 38vh 30px 55vh;
+        font-weight: 550; line-height: 1.5; letter-spacing: 0.005em;
+      }
+      #prompt-text p { margin: 0 0 0.9em; }
+      #prompt-text .show-line { color: #7aa5ff; }
+      #prompt-text.mirrored { transform: scaleX(-1); }
+      .prompt-guide {
+        position: absolute; left: 0; right: 0; top: 38%; height: 0;
+        border-top: 1px dashed rgba(255,255,255,0.14); pointer-events: none;
+      }
+      .prompt-bar {
+        display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px;
+        padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+        background: rgba(22,22,22,0.96); border-top: 1px solid rgba(255,255,255,0.1);
+      }
+      .prompt-bar .pbtn {
+        display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+        min-height: 40px; min-width: 44px; padding: 6px 12px;
+        border: 1px solid rgba(255,255,255,0.22); border-radius: 9px;
+        background: transparent; color: #f5f2ee; font-size: 13.5px;
+      }
+      .prompt-bar .pbtn:hover { background: rgba(255,255,255,0.1); }
+      .prompt-bar label { font-size: 12px; color: #bdb6ae; display: inline-flex; align-items: center; gap: 7px; }
+      .prompt-bar input[type="range"] { width: 110px; accent-color: var(--accent); min-height: 32px; }
+      .prompt-bar .spacer { flex: 1; }
+      .prompt-title { font-size: 13px; color: #bdb6ae; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+      /* ---------- Modal / toast ---------- */
+      #modal-root { position: fixed; inset: 0; z-index: 80; display: none; }
+      #modal-root.open { display: block; }
+      .modal-back { position: absolute; inset: 0; background: rgba(28, 20, 16, 0.42); }
+      .modal-card {
+        position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+        width: min(500px, calc(100vw - 32px)); max-height: calc(100dvh - 48px); overflow-y: auto;
+        background: var(--surface); border-radius: 16px; box-shadow: var(--shadow); padding: 22px 22px 18px;
+      }
+      .modal-card h2 { font-size: 18px; margin: 0 0 6px; }
+      .modal-card p { font-size: 14px; line-height: 1.55; color: var(--ink-2); margin: 0 0 12px; }
+      .modal-card label.flabel { display: block; font-size: 12.5px; font-weight: 600; color: var(--ink-2); margin: 12px 0 5px; }
+      .modal-card input[type="text"], .modal-card select {
+        width: 100%; min-height: 40px; padding: 8px 11px; font-size: 14.5px;
+        border: 1px solid var(--line); border-radius: 9px; background: var(--surface); color: var(--ink);
+      }
+      .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18px; flex-wrap: wrap; }
+      .modal-actions .left { margin-right: auto; }
+      .tpl-grid { display: grid; gap: 9px; margin-top: 4px; }
+      .tpl-card {
+        display: block; width: 100%; text-align: left; padding: 13px 15px;
+        border: 1.5px solid var(--line); border-radius: 12px; background: var(--surface); color: var(--ink);
+      }
+      .tpl-card:hover { border-color: var(--accent); }
+      .tpl-card.sel { border-color: var(--accent); background: var(--select-bg); }
+      .tpl-card .tt { font-size: 15px; font-weight: 650; display: block; }
+      .tpl-card .td { font-size: 13px; color: var(--muted); display: block; margin-top: 2px; line-height: 1.45; }
+      .swatches { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 2px; }
+      .swatch {
+        width: 34px; height: 34px; min-height: 34px; border-radius: 10px; border: 2px solid transparent;
+        padding: 0;
+      }
+      .swatch.sel { border-color: var(--ink); box-shadow: inset 0 0 0 2px var(--surface); }
+      .help-steps { margin: 0 0 12px; padding-left: 20px; font-size: 14px; line-height: 1.6; color: var(--ink-2); }
+      .help-steps li { margin-bottom: 7px; }
+      .help-steps strong { color: var(--ink); }
+      #toast {
+        position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%) translateY(16px);
+        background: #24211e; color: #f5f2ee; font-size: 13.5px; padding: 10px 16px; border-radius: 10px;
+        opacity: 0; pointer-events: none; transition: opacity 0.2s, transform 0.2s; z-index: 90;
+        max-width: calc(100vw - 32px); text-align: center;
+      }
+      #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+      /* ---------- Responsive ---------- */
+      @media (max-width: 1080px) {
+        #app { --sidebar-w: 218px; --list-w: 300px; }
+        .ed-head, #ed-body { padding-left: 24px; padding-right: 24px; }
+      }
+      .settings-grid { display: grid; gap: 4px; }
+      .settings-grid select, .settings-grid input[type="range"] { width: 100%; }
+      .settings-grid input[type="range"] { accent-color: var(--accent); min-height: 32px; }
+      .accent-swatches { display: flex; gap: 8px; flex-wrap: wrap; margin: 6px 0 4px; }
+      .accent-swatch { width: 36px; height: 36px; border-radius: 99px; border: 3px solid transparent; padding: 0; }
+      .accent-swatch.sel { border-color: var(--ink); box-shadow: inset 0 0 0 2px var(--surface); }
+      .seg-row { display: flex; gap: 6px; flex-wrap: wrap; }
+      .seg-btn { flex: 1; min-height: 38px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); border-radius: 9px; font-size: 13.5px; font-weight: 600; }
+      .seg-btn.sel { background: var(--accent); border-color: var(--accent); color: #fff; }
+      #settings-panel { position: fixed; inset: 0; z-index: 85; display: none; }
+      #settings-panel.open { display: block; }
+      #settings-panel .modal-card { width: min(560px, calc(100vw - 32px)); }
+      @media (max-width: 820px) {
+        #app { grid-template-columns: minmax(0, 1fr) !important; }
+        .resize-handle { display: none !important; }
+        #sidebar { display: none; }
+        #app.show-sidebar #sidebar {
+          display: flex; position: fixed; z-index: 50; top: 0; bottom: 0; left: 0;
+          width: min(300px, 86vw); box-shadow: var(--shadow);
+        }
+        #app.show-sidebar::after {
+          content: ""; position: fixed; inset: 0; z-index: 45;
+          background: rgba(28, 20, 16, 0.35);
+        }
+        #editorpane { display: none; }
+        #app.show-editor #editorpane { display: flex; position: fixed; inset: 0; z-index: 40; }
+        #app.show-editor #listpane { display: none; }
+        .mobile-only { display: inline-flex !important; }
+        .ed-head { padding-top: 12px; }
+        #ed-title { font-size: 26px; }
+        #ed-body { font-size: 17.5px; }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        #toast { transition: none; }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <!-- Sidebar -->
+      <aside id="sidebar" aria-label="Library">
+        <div class="side-scroll">
+          <div class="side-label">Library</div>
+          <div id="lib-views"></div>
+          <div class="side-label">
+            <span>Folders</span>
+            <button class="side-add" id="add-folder-btn" title="New folder" aria-label="New folder"></button>
+          </div>
+          <div id="folder-list"></div>
+        </div>
+        <div class="side-footer">
+          <p class="lib-status" id="lib-status"></p>
+          <button class="btn primary block" id="connect-btn"></button>
+          <div class="btn-row" id="folder-actions" hidden>
+            <button class="btn small" id="change-folder-btn">Different folder</button>
+            <button class="btn small" id="disconnect-btn">Disconnect</button>
+          </div>
+          <div class="btn-row">
+            <button class="btn small" id="export-btn"></button>
+            <button class="btn small" id="import-btn"></button>
+          </div>
+          <div class="btn-row">
+            <button class="btn small" id="settings-btn">⚙ Settings</button>
+            <button class="btn small" id="collapse-sidebar-btn" title="Collapse sidebar (Ctrl+B)">‹ Hide panel</button>
+          </div>
+          <button class="link-btn" id="help-btn">How syncing works</button>
+        </div>
+      </aside>
+      <div class="resize-handle" id="resize-1" title="Drag to resize sidebar" role="separator" aria-label="Resize sidebar"></div>
+
+      <!-- Script list -->
+      <section id="listpane" aria-label="Scripts">
+        <div class="list-head">
+          <div class="list-title-row">
+            <button class="icon-btn mobile-only" id="open-sidebar-btn" aria-label="Open library menu"></button>
+            <div style="flex:1;min-width:0">
+              <h1 class="list-title" id="view-title">All Scripts</h1>
+              <p class="list-sub" id="view-sub"></p>
+            </div>
+            <button class="btn primary" id="new-script-btn" style="min-height:38px"></button>
+            <button class="icon-btn" id="collapse-list-btn" title="Collapse script list (Ctrl+Shift+B)" aria-label="Collapse script list">‹</button>
+          </div>
+          <div class="search-wrap">
+            <span id="search-icon"></span>
+            <input id="search" type="search" placeholder="Search scripts" autocomplete="off" />
+          </div>
+          <div class="list-tools">
+            <label style="font-size:12.5px;color:var(--muted)" for="sort-sel">Sort</label>
+            <select id="sort-sel">
+              <option value="edited">Date edited</option>
+              <option value="title">Title A–Z</option>
+              <option value="longest">Longest read</option>
+              <option value="shortest">Shortest read</option>
+            </select>
+            <span class="spacer"></span>
+            <label style="font-size:12.5px;color:var(--muted)" for="wpm-sel">Pace</label>
+            <select id="wpm-sel" title="Speaking pace used for read-time estimates">
+              <option value="120">120 wpm</option>
+              <option value="130">130 wpm</option>
+              <option value="140">140 wpm</option>
+              <option value="150">150 wpm</option>
+              <option value="160">160 wpm</option>
+              <option value="170">170 wpm</option>
+              <option value="180">180 wpm</option>
+            </select>
+          </div>
+        </div>
+        <div id="script-list" role="listbox" aria-label="Script list"></div>
+      </section>
+      <div class="resize-handle" id="resize-2" title="Drag to resize script list" role="separator" aria-label="Resize script list"></div>
+
+      <!-- Editor -->
+      <section id="editorpane" aria-label="Editor">
+        <div class="expand-strip" id="expand-strip">
+          <button class="btn" id="expand-sidebar-btn">☰ Library panel</button>
+          <button class="btn" id="expand-list-btn">▤ Script list</button>
+          <span style="font-size:12.5px;color:var(--muted)">Full-width writing — Ctrl+B / Ctrl+Shift+B to toggle panels</span>
+        </div>
+        <div class="ed-empty" id="ed-empty">
+          <h2>No script open</h2>
+          <p>Pick a script from the list, or start a new one. New scripts can start blank or from your Primink and Globby formats.</p>
+          <p style="margin-top:10px"><strong>Local library, no confusing sync:</strong> Pick any folder on this computer. Your scripts live in that folder and the app will always open it, even after you close the app. Put the folder in Google Drive only if you want the same library on two computers.</p>
+          <button class="btn primary" id="empty-new-btn" style="margin-top:8px">New script</button>
+          <button class="btn" id="empty-connect-btn" style="margin-top:4px">Choose library folder…</button>
+        </div>
+        <div id="ed-main" style="display:none;flex-direction:column;min-height:0;flex:1">
+          <div class="ed-head">
+            <div class="ed-toprow">
+              <button class="icon-btn mobile-only" id="back-btn" aria-label="Back to script list"></button>
+              <span class="spacer"></span>
+              <button class="icon-btn" id="fav-btn" aria-label="Toggle favorite"></button>
+              <button class="icon-btn" id="dup-btn" aria-label="Duplicate script"></button>
+              <button class="icon-btn" id="del-btn" aria-label="Delete script"></button>
+              <button class="btn primary" id="prompt-btn" style="min-height:38px"></button>
+            </div>
+            <div id="ed-title" contenteditable="true" spellcheck="true" role="textbox" aria-label="Script title"></div>
+            <div class="ed-meta" id="ed-meta"></div>
+            <div class="toolbar" id="toolbar" role="toolbar" aria-label="Formatting"></div>
+          </div>
+          <div class="ed-scroll" id="ed-scroll">
+            <div id="ed-body" contenteditable="true" spellcheck="true" role="textbox" aria-label="Script body"></div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- Prompter -->
+    <div id="prompter" hidden>
+      <div id="prompt-scroll">
+        <div id="prompt-text"></div>
+      </div>
+      <div class="prompt-guide"></div>
+      <div class="prompt-bar">
+        <button class="pbtn" id="prompt-play"></button>
+        <button class="pbtn" id="prompt-restart">Restart</button>
+        <label>Speed <input type="range" id="prompt-speed" min="10" max="220" value="55" /></label>
+        <label>Text size <input type="range" id="prompt-size" min="24" max="72" value="40" /></label>
+        <button class="pbtn" id="prompt-mirror">Mirror</button>
+        <span class="spacer"></span>
+        <span class="prompt-title" id="prompt-title"></span>
+        <button class="pbtn" id="prompt-close">Done</button>
+      </div>
+    </div>
+
+    <div id="settings-panel" role="dialog" aria-modal="true" aria-label="Settings"></div>
+    <div id="modal-root"></div>
+    <div id="toast" role="status"></div>
+    <input type="file" id="import-file" accept=".json,application/json" hidden />
+
+    <script>
+      "use strict";
+      /* ================= Icons (inline SVG, stroke style) ================= */
+      var ICONS = {
+        doc: '<path d="M6 2.5h8L19 7.5v14H6z"/><path d="M13.5 2.5v5.5H19"/><path d="M9 12.5h6M9 16h6"/>',
+        clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.2 2"/>',
+        star: '<path d="M12 3.4l2.6 5.3 5.8.8-4.2 4.1 1 5.8L12 16.7l-5.2 2.7 1-5.8L3.6 9.5l5.8-.8z"/>',
+        starFill: '<path fill="currentColor" stroke="none" d="M12 3.4l2.6 5.3 5.8.8-4.2 4.1 1 5.8L12 16.7l-5.2 2.7 1-5.8L3.6 9.5l5.8-.8z"/>',
+        plus: '<path d="M12 5v14M5 12h14"/>',
+        search: '<circle cx="11" cy="11" r="7"/><path d="M20.5 20.5L16 16"/>',
+        download: '<path d="M12 4v11M7.5 11L12 15.5 16.5 11"/><path d="M4.5 19.5h15"/>',
+        upload: '<path d="M12 15V4M7.5 8L12 3.5 16.5 8"/><path d="M4.5 19.5h15"/>',
+        folderOpen: '<path d="M3.5 6.5A1.5 1.5 0 0 1 5 5h4l2 2.5h8A1.5 1.5 0 0 1 20.5 9v8A1.5 1.5 0 0 1 19 18.5H5A1.5 1.5 0 0 1 3.5 17z"/>',
+        play: '<path fill="currentColor" stroke="none" d="M8 5.2v13.6c0 .8.9 1.3 1.6.9l10-6.8c.6-.4.6-1.4 0-1.8l-10-6.8c-.7-.4-1.6.1-1.6.9z"/>',
+        pause: '<path d="M8.5 5v14M15.5 5v14"/>',
+        trash: '<path d="M4.5 6.5h15M9.5 6V4.5A.5.5 0 0 1 10 4h4a.5.5 0 0 1 .5.5V6"/><path d="M6.5 6.5l1 13h9l1-13"/><path d="M10 10.5v6M14 10.5v6"/>',
+        copy: '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/>',
+        x: '<path d="M5.5 5.5l13 13M18.5 5.5l-13 13"/>',
+        check: '<path d="M4.5 12.5l5 5L19.5 7"/>',
+        chevL: '<path d="M14.5 5.5L8 12l6.5 6.5"/>',
+        menu: '<path d="M4 7h16M4 12h16M4 17h16"/>',
+        pencil: '<path d="M4 20l1-4L16.5 4.5a2.1 2.1 0 0 1 3 3L8 19z"/><path d="M14.5 6.5l3 3"/>',
+        bold: '<path d="M7 5h6a3.5 3.5 0 0 1 0 7H7zM7 12h7a3.5 3.5 0 0 1 0 7H7z"/>',
+        italic: '<path d="M10 5h6M8 19h6M14 5l-4 14"/>',
+        underline: '<path d="M7 4.5V11a5 5 0 0 0 10 0V4.5"/><path d="M5.5 19.5h13"/>',
+        listUl: '<path d="M9 6.5h11M9 12h11M9 17.5h11"/><circle cx="4.8" cy="6.5" r="1.1" fill="currentColor" stroke="none"/><circle cx="4.8" cy="12" r="1.1" fill="currentColor" stroke="none"/><circle cx="4.8" cy="17.5" r="1.1" fill="currentColor" stroke="none"/>',
+        listOl: '<path d="M10 6.5h10M10 12h10M10 17.5h10"/><path d="M4 5.2l1.2-.7v3.4M3.8 17.3c.3-1.4 2.9-1.7 2.9-3.2 0-.8-.6-1.3-1.3-1.3-.7 0-1.2.5-1.3 1.2"/>',
+        link: '<path d="M10 14a4.5 4.5 0 0 0 6.4 0l3-3a4.5 4.5 0 1 0-6.4-6.4l-1.5 1.5"/><path d="M14 10a4.5 4.5 0 0 0-6.4 0l-3 3a4.5 4.5 0 1 0 6.4 6.4l1.5-1.5"/>'
+      };
+      function icon(name, size) {
+        size = size || 18;
+        return '<svg width="' + size + '" height="' + size + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + (ICONS[name] || "") + "</svg>";
+      }
+
+      /* ================= State ================= */
+      var FOLDER_COLORS = ["#d97706", "#3d9e4d", "#2f6fd0", "#d14d7e", "#0f766e", "#e0533d", "#7c5cd6", "#6b7280"];
+      var state = {
+        folders: [],
+        scripts: [],
+        settings: { wpm: 150, theme: "light", accent: "#b83a5e", editorFontSize: 18.5, promptSpeed: 55, promptSize: 40, promptMirror: false },
+        view: { type: "all", folderId: null },
+        selectedId: null,
+        search: "",
+        sort: "edited"
+      };
+      var dirHandle = null;        // File System Access handle for the library folder
+      var dirName = "";
+      var dirtyScripts = {};       // scriptId -> true (needs file write)
+      var deletedScriptIds = {};   // scriptId -> true (needs file removal)
+      var libraryDirty = false;    // library.json needs rewrite
+      var lastExportAt = 0;
+      var flushTimer = null;
+      var sessionEdited = false;   // any edit made while no folder connected
+
+      function uid() {
+        return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+      }
+      function $(sel) { return document.querySelector(sel); }
+      function esc(s) {
+        return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+          return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+        });
+      }
+
+      /* ================= Persistent settings & layout (localStorage) ================= */
+      var LS_SETTINGS = "script-library-settings-v2";
+      var LS_LAYOUT = "script-library-layout-v1";
+      var ACCENTS = [
+        { color: "#b83a5e", ink: "#9c2b4d", sel: "#f6dce6", name: "Rose" },
+        { color: "#2563eb", ink: "#1d4ed8", sel: "#dbeafe", name: "Blue" },
+        { color: "#2e7d46", ink: "#256b3a", sel: "#d9ecdd", name: "Green" },
+        { color: "#d97706", ink: "#b45309", sel: "#fde68a", name: "Amber" },
+        { color: "#7c5cd6", ink: "#6344b8", sel: "#e6defa", name: "Violet" },
+        { color: "#0f766e", ink: "#0b5e57", sel: "#ccfbf1", name: "Teal" },
+        { color: "#e0533d", ink: "#c23e2a", sel: "#fde0d9", name: "Coral" },
+        { color: "#475569", ink: "#334155", sel: "#e2e8f0", name: "Slate" }
+      ];
+      function loadLocalSettings() {
+        try { var raw = localStorage.getItem(LS_SETTINGS); if (raw) { var s = JSON.parse(raw); Object.keys(s).forEach(function(k){ state.settings[k]=s[k]; }); } } catch(e) {}
+      }
+      function saveLocalSettings() {
+        try { localStorage.setItem(LS_SETTINGS, JSON.stringify(state.settings)); } catch(e) {}
+        libraryDirty = true; scheduleFlush();
+      }
+      function applySettings() {
+        var root = document.documentElement;
+        root.setAttribute("data-theme", state.settings.theme || "light");
+        var acc = ACCENTS.filter(function(a){ return a.color===state.settings.accent; })[0] || ACCENTS[0];
+        // dark select bg adjustment
+        var isDark = state.settings.theme==="dark" || (state.settings.theme==="system" && window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
+        root.style.setProperty("--accent", acc.color);
+        root.style.setProperty("--accent-ink", acc.ink);
+        root.style.setProperty("--select-bg", isDark ? "#33262e" : acc.sel);
+        root.style.setProperty("--editor-size", (state.settings.editorFontSize||18.5) + "px");
+        promptState.speed = state.settings.promptSpeed != null ? state.settings.promptSpeed : 55;
+        promptState.size = state.settings.promptSize != null ? state.settings.promptSize : 40;
+        promptState.mirrored = !!state.settings.promptMirror;
+        var sp = document.querySelector("#prompt-speed"); if (sp) sp.value = promptState.speed;
+        var sz = document.querySelector("#prompt-size"); if (sz) sz.value = promptState.size;
+        var pt = document.querySelector("#prompt-text"); if (pt) pt.classList.toggle("mirrored", promptState.mirrored);
+        applyPromptSize();
+      }
+      var layoutState = { sidebarW: 248, listW: 348, sidebarCollapsed: false, listCollapsed: false };
+      function loadLayout() {
+        try { var raw = localStorage.getItem(LS_LAYOUT); if (raw) layoutState = Object.assign(layoutState, JSON.parse(raw)); } catch(e) {}
+        applyLayout();
+      }
+      function saveLayout() { try { localStorage.setItem(LS_LAYOUT, JSON.stringify(layoutState)); } catch(e) {} }
+      function applyLayout() {
+        var app = document.getElementById("app"); if (!app) return;
+        document.documentElement.style.setProperty("--sidebar-w", layoutState.sidebarW + "px");
+        document.documentElement.style.setProperty("--list-w", layoutState.listW + "px");
+        app.classList.toggle("sidebar-collapsed", !!layoutState.sidebarCollapsed);
+        app.classList.toggle("list-collapsed", !!layoutState.listCollapsed);
+      }
+      function toggleSidebar() { layoutState.sidebarCollapsed = !layoutState.sidebarCollapsed; saveLayout(); applyLayout(); }
+      function toggleList() { layoutState.listCollapsed = !layoutState.listCollapsed; saveLayout(); applyLayout(); }
+      /* IndexedDB handle persistence for plain browsers */
+      function idbOpen() { return new Promise(function(res, rej){ var r = indexedDB.open("script-library-db", 1); r.onupgradeneeded = function(){ r.result.createObjectStore("kv"); }; r.onsuccess = function(){ res(r.result); }; r.onerror = function(){ rej(r.error); }; }); }
+      async function idbSet(k, v) { try { var db = await idbOpen(); return new Promise(function(res){ var tx = db.transaction("kv","readwrite"); tx.objectStore("kv").put(v,k); tx.oncomplete = res; tx.onerror = res; }); } catch(e) {} }
+      async function idbGet(k) { try { var db = await idbOpen(); return new Promise(function(res){ var rq = db.transaction("kv").objectStore("kv").get(k); rq.onsuccess = function(){ res(rq.result||null); }; rq.onerror = function(){ res(null); }; }); } catch(e) { return null; } }
+      async function idbDel(k) { try { var db = await idbOpen(); return new Promise(function(res){ var tx = db.transaction("kv","readwrite"); tx.objectStore("kv").delete(k); tx.oncomplete = res; tx.onerror = res; }); } catch(e) {} }
+      function nativeBridge() { return window.scriptLibraryNative && window.scriptLibraryNative.isNative ? window.scriptLibraryNative : null; }
+
+      /* ================= Text / time helpers ================= */
+      function htmlToText(html) {
+        var div = document.createElement("div");
+        div.innerHTML = html || "";
+        var text = div.innerText || div.textContent || "";
+        return text.replace(/\u00a0/g, " ").trim();
+      }
+      function countWords(text) {
+        if (!text) return 0;
+        var m = text.match(/\S+/g);
+        return m ? m.length : 0;
+      }
+      function scriptWords(s) { return countWords(htmlToText(s.body)); }
+      function readSeconds(words) {
+        var wpm = state.settings.wpm || 150;
+        return Math.round((words / wpm) * 60);
+      }
+      function fmtReadTime(words) {
+        var sec = readSeconds(words);
+        var h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
+        function p(n) { return (n < 10 ? "0" : "") + n; }
+        if (h > 0) return h + ":" + p(m) + ":" + p(s);
+        return m + ":" + p(s);
+      }
+      function fmtDateLabel(ts) {
+        var d = new Date(ts), now = new Date();
+        var startOf = function (x) { return new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime(); };
+        var diffDays = Math.round((startOf(now) - startOf(d)) / 86400000);
+        if (diffDays <= 0) return "Today";
+        if (diffDays === 1) return "Yesterday";
+        if (diffDays < 7) return d.toLocaleDateString(undefined, { weekday: "short" });
+        if (d.getFullYear() === now.getFullYear()) return (d.getMonth() + 1) + "/" + d.getDate();
+        return (d.getMonth() + 1) + "/" + d.getDate() + "/" + String(d.getFullYear()).slice(2);
+      }
+      function fmtFullDate(ts) {
+        return new Date(ts).toLocaleString(undefined, { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" });
+      }
+      function folderById(id) {
+        for (var i = 0; i < state.folders.length; i++) if (state.folders[i].id === id) return state.folders[i];
+        return null;
+      }
+      function scriptById(id) {
+        for (var i = 0; i < state.scripts.length; i++) if (state.scripts[i].id === id) return state.scripts[i];
+        return null;
+      }
+
+      /* ================= Seed library (first run) ================= */
+      function seedLibrary() {
+        var fPrimink = uid(), fGlobby = uid(), fSponsor = uid(), fIdeas = uid();
+        state.folders = [
+          { id: fPrimink, name: "Primink", color: "#e0533d" },
+          { id: fGlobby, name: "Globby", color: "#3d9e4d" },
+          { id: fSponsor, name: "Sponsor reads", color: "#d97706" },
+          { id: fIdeas, name: "Ideas", color: "#2f6fd0" }
+        ];
+        var now = Date.now();
+        state.scripts = [{
+          id: uid(),
+          title: "Welcome to your Script Library",
+          folderId: null,
+          favorite: true,
+          createdAt: now,
+          updatedAt: now,
+          body:
+            "<p>This is your script library: every script in one place, organized in folders, with an estimated read time next to each one based on your speaking pace.</p>" +
+            "<h2>Sync it between your PC and Mac</h2>" +
+            "<p>Pick any folder on this computer. Your scripts live in that folder and the app will always open it, even after you close the app. Put the folder in Google Drive only if you want the same library on two computers.</p>" + "<p>Use <strong>Choose library folder</strong> in the sidebar once. After that there is nothing to re-connect each time you open the app. Export / Import below is just a backup option.</p>" +
+            "<p>No folder connected yet? Use <strong>Export</strong> to download the whole library as one file, and <strong>Import</strong> to load it on the other computer.</p>" +
+            "<h2>Writing</h2>" +
+            "<p>Use the <strong>New script</strong> button and pick a starting format: blank, your Primink documentary format, or your Globby format with SHOW lines and a pinned comment jokes section. The blue SHOW button in the toolbar drops in a blue SHOW line for source clips.</p>" +
+            "<h2>Recording</h2>" +
+            "<p>Open a script and hit <strong>Prompter</strong> to read it full-screen with auto-scroll. Set the speed and text size once and it stays comfortable.</p>" +
+            "<p>Delete this script whenever you're ready. It's just a tour.</p>"
+        }];
+        state.selectedId = state.scripts[0].id;
+      }
+
+      /* ================= Save pipeline ================= */
+      function markDirty(scriptId) {
+        if (scriptId) dirtyScripts[scriptId] = true;
+        libraryDirty = true;
+        if (!dirHandle) sessionEdited = true;
+        updateSaveStatus();
+        scheduleFlush();
+      }
+      function scheduleFlush() {
+        if (!dirHandle) return;
+        if (flushTimer) clearTimeout(flushTimer);
+        flushTimer = setTimeout(flushToFolder, 600);
+      }
+      function updateSaveStatus() {
+        var el = $("#lib-status");
+        var btn = $("#connect-btn");
+        var fa = $("#folder-actions");
+        if (dirHandle) {
+          el.innerHTML = "Library folder: <strong>" + esc(dirName) + "</strong><br>Saved automatically. This folder will reopen every time you launch the app — no need to reconnect.";
+          btn.innerHTML = icon("folderOpen", 16) + " Library: " + esc(dirName);
+          if (fa) fa.hidden = false;
+        } else {
+          var warn = sessionEdited ? '<br><span class="warn">Edits from this session are not in a folder yet. Choose a library folder to keep them.</span>' : "";
+          el.innerHTML = "<strong>No library folder yet.</strong> Pick any folder on this computer. Your scripts live in that folder and the app will always open it, even after you close the app. Put the folder in Google Drive only if you want the same library on two computers." + warn;
+          btn.innerHTML = icon("folderOpen", 16) + " Choose library folder…";
+          if (fa) fa.hidden = true;
+        }
+      }
+
+      /* ================= Views / filtering ================= */
+      function isRecent(s) { return Date.now() - s.updatedAt < 7 * 86400000; }
+      function viewScripts() {
+        var v = state.view;
+        var list = state.scripts.filter(function (s) {
+          if (v.type === "favorites") return s.favorite;
+          if (v.type === "recent") return isRecent(s);
+          if (v.type === "folder") return s.folderId === v.folderId;
+          return true;
+        });
+        if (state.search) {
+          var q = state.search.toLowerCase();
+          list = list.filter(function (s) {
+            return s.title.toLowerCase().indexOf(q) !== -1 || htmlToText(s.body).toLowerCase().indexOf(q) !== -1;
+          });
+        }
+        var byTitle = function (a, b) { return a.title.localeCompare(b.title); };
+        if (state.sort === "title") list.sort(byTitle);
+        else if (state.sort === "longest") list.sort(function (a, b) { return scriptWords(b) - scriptWords(a) || b.updatedAt - a.updatedAt; });
+        else if (state.sort === "shortest") list.sort(function (a, b) { return scriptWords(a) - scriptWords(b) || b.updatedAt - a.updatedAt; });
+        else list.sort(function (a, b) { return b.updatedAt - a.updatedAt; });
+        return list;
+      }
+      function viewTitle() {
+        var v = state.view;
+        if (v.type === "favorites") return "Favorites";
+        if (v.type === "recent") return "Recent";
+        if (v.type === "folder") { var f = folderById(v.folderId); return f ? f.name : "Folder"; }
+        return "All Scripts";
+      }
+
+      /* ================= Rendering ================= */
+      function renderSidebar() {
+        var favCount = state.scripts.filter(function (s) { return s.favorite; }).length;
+        var recentCount = state.scripts.filter(isRecent).length;
+        var views = [
+          { type: "all", label: "All Scripts", ic: "doc", count: state.scripts.length },
+          { type: "recent", label: "Recent", ic: "clock", count: recentCount },
+          { type: "favorites", label: "Favorites", ic: "star", count: favCount }
+        ];
+        $("#lib-views").innerHTML = views.map(function (v) {
+          var active = state.view.type === v.type ? " active" : "";
+          return '<button class="side-item' + active + '" data-view="' + v.type + '">' + icon(v.ic, 17) +
+            '<span class="grow">' + esc(v.label) + '</span><span class="side-count">' + v.count + "</span></button>";
+        }).join("");
+        $("#folder-list").innerHTML = state.folders.map(function (f) {
+          var count = state.scripts.filter(function (s) { return s.folderId === f.id; }).length;
+          var active = state.view.type === "folder" && state.view.folderId === f.id ? " active" : "";
+          return '<button class="side-item' + active + '" data-folder="' + f.id + '">' +
+            '<span class="folder-dot" style="background:' + esc(f.color) + '"></span>' +
+            '<span class="grow">' + esc(f.name) + '</span>' +
+            '<span class="side-count">' + count + "</span>" +
+            '<span class="folder-edit-btn" data-edit-folder="' + f.id + '" role="button" aria-label="Edit folder ' + esc(f.name) + '" title="Rename or delete folder">' + icon("pencil", 14) + "</span></button>";
+        }).join("");
+        var btns = document.querySelectorAll("#lib-views .side-item");
+        btns.forEach(function (b) {
+          b.addEventListener("click", function () {
+            state.view = { type: b.getAttribute("data-view"), folderId: null };
+            closeSidebarMobile();
+            renderAll();
+          });
+        });
+        document.querySelectorAll("#folder-list .side-item").forEach(function (b) {
+          b.addEventListener("click", function (e) {
+            var editId = e.target.closest("[data-edit-folder]");
+            if (editId) { e.stopPropagation(); openFolderModal(folderById(editId.getAttribute("data-edit-folder"))); return; }
+            state.view = { type: "folder", folderId: b.getAttribute("data-folder") };
+            closeSidebarMobile();
+            renderAll();
+          });
+        });
+      }
+
+      function renderList() {
+        $("#view-title").textContent = viewTitle();
+        var list = viewScripts();
+        var total = state.scripts.length;
+        $("#view-sub").textContent = state.search
+          ? list.length + " match" + (list.length === 1 ? "" : "es") + " for “" + state.search + "”"
+          : list.length + (list.length === 1 ? " script" : " scripts") + (state.view.type === "all" ? "" : " · " + total + " total");
+        if (!list.length) {
+          $("#script-list").innerHTML = '<div class="list-empty">' +
+            (state.search
+              ? "Nothing matches that search."
+              : total === 0
+                ? "Your library is empty. Start your first script."
+                : "Nothing here yet. Scripts you " + (state.view.type === "favorites" ? "star" : state.view.type === "recent" ? "edit" : "file here") + " will show up.") +
+            '<br><button class="btn primary" id="empty-list-new">New script</button></div>';
+          var b = $("#empty-list-new");
+          if (b) b.addEventListener("click", openNewScriptModal);
+          return;
+        }
+        $("#script-list").innerHTML = list.map(function (s) {
+          var f = folderById(s.folderId);
+          var words = scriptWords(s);
+          return '<button class="script-row' + (s.id === state.selectedId ? " active" : "") + '" data-id="' + s.id + '" role="option" aria-selected="' + (s.id === state.selectedId) + '">' +
+            '<span class="t">' + esc(s.title || "Untitled script") + "</span>" +
+            '<span class="m">' + (s.favorite ? '<span class="star">' + icon("starFill", 12) + "</span>" : "") +
+            fmtReadTime(words) + " · " + fmtDateLabel(s.updatedAt) + " · " + esc(f ? f.name : "Unfiled") + "</span></button>";
+        }).join("");
+        document.querySelectorAll(".script-row").forEach(function (row) {
+          row.addEventListener("click", function () {
+            selectScript(row.getAttribute("data-id"), true);
+          });
+        });
+      }
+
+      function renderEditorMeta(s) {
+        var words = scriptWords(s);
+        var folderOpts = '<option value="">Unfiled</option>' + state.folders.map(function (f) {
+          return '<option value="' + f.id + '"' + (s.folderId === f.id ? " selected" : "") + ">" + esc(f.name) + "</option>";
+        }).join("");
+        $("#ed-meta").innerHTML =
+          '<label>Folder <select id="ed-folder-sel" aria-label="Script folder">' + folderOpts + "</select></label>" +
+          '<span class="rt">' + fmtReadTime(words) + " read</span>" +
+          "<span>" + words.toLocaleString() + " words</span>" +
+          "<span>Edited " + fmtFullDate(s.updatedAt) + "</span>";
+        $("#ed-folder-sel").addEventListener("change", function (e) {
+          s.folderId = e.target.value || null;
+          s.updatedAt = Date.now();
+          markDirty(s.id);
+          renderSidebar(); renderList(); renderEditorMeta(s);
+        });
+        var favBtn = $("#fav-btn");
+        favBtn.innerHTML = icon(s.favorite ? "starFill" : "star", 18);
+        favBtn.classList.toggle("on", !!s.favorite);
+        favBtn.title = s.favorite ? "Remove from Favorites" : "Add to Favorites";
+      }
+
+      function renderEditor() {
+        var s = scriptById(state.selectedId);
+        var empty = $("#ed-empty"), main = $("#ed-main");
+        if (!s) {
+          empty.style.display = "flex";
+          main.style.display = "none";
+          return;
+        }
+        empty.style.display = "none";
+        main.style.display = "flex";
+        var titleEl = $("#ed-title"), bodyEl = $("#ed-body");
+        if (document.activeElement !== titleEl) titleEl.textContent = s.title;
+        if (document.activeElement !== bodyEl && bodyEl.innerHTML !== s.body) bodyEl.innerHTML = s.body;
+        renderEditorMeta(s);
+      }
+
+      function renderAll() {
+        renderSidebar();
+        renderList();
+        renderEditor();
+        updateSaveStatus();
+      }
+
+      function selectScript(id, showOnMobile) {
+        state.selectedId = id;
+        renderList();
+        renderEditor();
+        if (showOnMobile) document.getElementById("app").classList.add("show-editor");
+      }
+      function closeSidebarMobile() {
+        document.getElementById("app").classList.remove("show-sidebar");
+      }
+
+      /* ================= Script CRUD ================= */
+      function createScript(title, folderId, body) {
+        var now = Date.now();
+        var s = {
+          id: uid(),
+          title: title || "Untitled script",
+          folderId: folderId || null,
+          favorite: false,
+          createdAt: now,
+          updatedAt: now,
+          body: body || "<p></p>"
+        };
+        state.scripts.unshift(s);
+        markDirty(s.id);
+        selectScript(s.id, true);
+        renderSidebar();
+        return s;
+      }
+      function deleteScript(id) {
+        var s = scriptById(id);
+        if (!s) return;
+        state.scripts = state.scripts.filter(function (x) { return x.id !== id; });
+        deletedScriptIds[id] = true;
+        delete dirtyScripts[id];
+        if (state.selectedId === id) {
+          var rest = viewScripts();
+          state.selectedId = rest.length ? rest[0].id : (state.scripts[0] ? state.scripts[0].id : null);
+        }
+        libraryDirty = true;
+        if (!dirHandle) sessionEdited = true;
+        scheduleFlush();
+        renderAll();
+        toast("Deleted “" + (s.title || "Untitled script") + "”");
+      }
+      function duplicateScript(id) {
+        var s = scriptById(id);
+        if (!s) return;
+        var now = Date.now();
+        var copy = {
+          id: uid(), title: (s.title || "Untitled script") + " copy", folderId: s.folderId,
+          favorite: false, createdAt: now, updatedAt: now, body: s.body
+        };
+        state.scripts.unshift(copy);
+        markDirty(copy.id);
+        selectScript(copy.id, true);
+        renderSidebar();
+        toast("Duplicated script");
+      }
+
+      /* ================= Templates ================= */
+      function priminkTemplate() {
+        return "<h2>Title options</h2><p>1. </p><p>2. </p><p>3. </p>" +
+          "<h2>Thumbnail text options</h2><p>1. </p><p>2. </p><p>3. </p>" +
+          "<h2>Brief description</h2><p></p>" +
+          "<h2>Used media links</h2><p></p>" +
+          "<h2>Script</h2><p></p>";
+      }
+      function globbyTemplate() {
+        return "<h2>Title options</h2><p>1. </p><p>2. </p><p>3. </p>" +
+          "<h2>Thumbnail text options</h2><p>1. </p><p>2. </p><p>3. </p>" +
+          "<h2>Script</h2><p></p>" +
+          '<p class="show-line">SHOW: </p><p></p>' +
+          "<h2>Pinned comment jokes</h2><p>1. </p><p>2. </p><p>3. </p>";
+      }
+
+      /* ================= Editor wiring ================= */
+      function buildToolbar() {
+        var tb = $("#toolbar");
+        tb.innerHTML =
+          '<button class="tool-btn" data-cmd="bold" title="Bold">' + icon("bold", 16) + "</button>" +
+          '<button class="tool-btn" data-cmd="italic" title="Italic">' + icon("italic", 16) + "</button>" +
+          '<button class="tool-btn" data-cmd="underline" title="Underline">' + icon("underline", 16) + "</button>" +
+          '<span class="tool-sep"></span>' +
+          '<button class="tool-btn" data-block="H1" title="Large heading" style="font-weight:700;font-size:15px">H1</button>' +
+          '<button class="tool-btn" data-block="H2" title="Section heading" style="font-weight:700;font-size:13.5px">H2</button>' +
+          '<button class="tool-btn" data-block="P" title="Body text" style="font-size:13.5px">Body</button>' +
+          '<span class="tool-sep"></span>' +
+          '<button class="tool-btn" data-cmd="insertUnorderedList" title="Bullet list">' + icon("listUl", 17) + "</button>" +
+          '<button class="tool-btn" data-cmd="insertOrderedList" title="Numbered list">' + icon("listOl", 17) + "</button>" +
+          '<button class="tool-btn" data-cmd="createLink" title="Add link">' + icon("link", 16) + "</button>" +
+          '<span class="tool-sep"></span>' +
+          '<button class="tool-btn wide" id="show-line-btn" title="Insert a blue SHOW line for a source clip">SHOW line</button>' +
+          '<button class="tool-btn" data-cmd="removeFormat" title="Clear formatting" style="font-size:12.5px">Clear</button>';
+        tb.querySelectorAll("[data-cmd]").forEach(function (b) {
+          b.addEventListener("mousedown", function (e) { e.preventDefault(); });
+          b.addEventListener("click", function () {
+            var cmd = b.getAttribute("data-cmd");
+            if (cmd === "createLink") {
+              openLinkModal();
+              return;
+            }
+            document.execCommand(cmd, false, null);
+            syncBodyFromEditor();
+          });
+        });
+        tb.querySelectorAll("[data-block]").forEach(function (b) {
+          b.addEventListener("mousedown", function (e) { e.preventDefault(); });
+          b.addEventListener("click", function () {
+            document.execCommand("formatBlock", false, b.getAttribute("data-block"));
+            syncBodyFromEditor();
+          });
+        });
+        $("#show-line-btn").addEventListener("mousedown", function (e) { e.preventDefault(); });
+        $("#show-line-btn").addEventListener("click", function () {
+          $("#ed-body").focus();
+          document.execCommand("insertHTML", false, '<p class="show-line">SHOW: &nbsp;</p><p></p>');
+          syncBodyFromEditor();
+        });
+      }
+      var bodySyncTimer = null;
+      function syncBodyFromEditor() {
+        var s = scriptById(state.selectedId);
+        if (!s) return;
+        var bodyEl = $("#ed-body");
+        if (bodyEl.textContent.trim() === "") bodyEl.innerHTML = "";
+        s.body = bodyEl.innerHTML;
+        s.updatedAt = Date.now();
+        markDirty(s.id);
+        if (bodySyncTimer) clearTimeout(bodySyncTimer);
+        bodySyncTimer = setTimeout(function () {
+          renderList();
+          renderEditorMeta(s);
+        }, 450);
+      }
+      function wireEditor() {
+        var titleEl = $("#ed-title"), bodyEl = $("#ed-body");
+        titleEl.addEventListener("input", function () {
+          var s = scriptById(state.selectedId);
+          if (!s) return;
+          s.title = titleEl.textContent.replace(/\s+/g, " ").trim();
+          s.updatedAt = Date.now();
+          markDirty(s.id);
+          if (bodySyncTimer) clearTimeout(bodySyncTimer);
+          bodySyncTimer = setTimeout(function () { renderList(); renderSidebar(); }, 450);
+        });
+        titleEl.addEventListener("keydown", function (e) {
+          if (e.key === "Enter") { e.preventDefault(); bodyEl.focus(); }
+        });
+        titleEl.addEventListener("paste", function (e) {
+          e.preventDefault();
+          var t = (e.clipboardData || window.clipboardData).getData("text/plain");
+          document.execCommand("insertText", false, t.replace(/\s+/g, " "));
+        });
+        bodyEl.addEventListener("input", syncBodyFromEditor);
+        $("#fav-btn").addEventListener("click", function () {
+          var s = scriptById(state.selectedId);
+          if (!s) return;
+          s.favorite = !s.favorite;
+          s.updatedAt = Date.now();
+          markDirty(s.id);
+          renderAll();
+        });
+        $("#dup-btn").addEventListener("click", function () { duplicateScript(state.selectedId); });
+        $("#del-btn").addEventListener("click", function () {
+          var s = scriptById(state.selectedId);
+          if (s) openConfirmModal("Delete this script?", "“" + (s.title || "Untitled script") + "” will be removed from the library" + (dirHandle ? " and its file deleted from the library folder" : "") + ". This can't be undone.", "Delete", function () { deleteScript(s.id); });
+        });
+        $("#prompt-btn").addEventListener("click", openPrompter);
+        $("#back-btn").addEventListener("click", function () {
+          document.getElementById("app").classList.remove("show-editor");
+        });
+      }
+
+      /* ================= Library folder (File System Access) ================= */
+      function fsSupported() { return typeof window.showDirectoryPicker === "function"; }
+      async function writeTextFile(dir, name, text) {
+        var fh = await dir.getFileHandle(name, { create: true });
+        var w = await fh.createWritable();
+        await w.write(text);
+        await w.close();
+      }
+      async function readTextFile(dir, name) {
+        var fh = await dir.getFileHandle(name);
+        var f = await fh.getFile();
+        return await f.text();
+      }
+      function libraryIndexJSON() {
+        return JSON.stringify({
+          app: "script-library", version: 1, updatedAt: Date.now(),
+          folders: state.folders, settings: state.settings,
+          scriptIds: state.scripts.map(function (s) { return s.id; })
+        }, null, 2);
+      }
+      function scriptFileJSON(s) {
+        return JSON.stringify({
+          id: s.id, title: s.title, folderId: s.folderId, favorite: s.favorite,
+          createdAt: s.createdAt, updatedAt: s.updatedAt, body: s.body
+        }, null, 2);
+      }
+      async function flushToFolder() {
+        if (!dirHandle) return;
+        try {
+          var scriptsDir = await dirHandle.getDirectoryHandle("scripts", { create: true });
+          var ids = Object.keys(dirtyScripts);
+          for (var i = 0; i < ids.length; i++) {
+            var s = scriptById(ids[i]);
+            if (s) await writeTextFile(scriptsDir, s.id + ".json", scriptFileJSON(s));
+            delete dirtyScripts[ids[i]];
+          }
+          var dels = Object.keys(deletedScriptIds);
+          for (var j = 0; j < dels.length; j++) {
+            try { await scriptsDir.removeEntry(dels[j] + ".json"); } catch (e) { /* already gone */ }
+            delete deletedScriptIds[dels[j]];
+          }
+          if (libraryDirty) {
+            await writeTextFile(dirHandle, "library.json", libraryIndexJSON());
+            libraryDirty = false;
+          }
+          sessionEdited = false;
+          updateSaveStatus();
+        } catch (err) {
+          toast("Couldn't save to the library folder. It may have been moved or permission was revoked.");
+        }
+      }
+      async function loadLibraryFromFolder(handle) {
+        var index = null;
+        try { index = JSON.parse(await readTextFile(handle, "library.json")); } catch (e) { index = null; }
+        var scriptsDir = null;
+        try { scriptsDir = await handle.getDirectoryHandle("scripts"); } catch (e) { scriptsDir = null; }
+        if (!index && !scriptsDir) return false;
+        var folders = (index && index.folders) || [];
+        var settings = (index && index.settings) || { wpm: 150 };
+        var ids = (index && index.scriptIds) || [];
+        if (!ids.length && scriptsDir) {
+          for await (var entry of scriptsDir.values()) {
+            if (entry.kind === "file" && entry.name.slice(-5) === ".json") ids.push(entry.name.slice(0, -5));
+          }
+        }
+        var scripts = [];
+        if (scriptsDir) {
+          for (var i = 0; i < ids.length; i++) {
+            try {
+              var raw = JSON.parse(await readTextFile(scriptsDir, ids[i] + ".json"));
+              if (raw && raw.id) {
+                scripts.push({
+                  id: raw.id, title: raw.title || "Untitled script",
+                  folderId: raw.folderId || null, favorite: !!raw.favorite,
+                  createdAt: raw.createdAt || Date.now(), updatedAt: raw.updatedAt || Date.now(),
+                  body: raw.body || ""
+                });
+              }
+            } catch (e) { /* skip unreadable script file */ }
+          }
+        }
+        state.folders = folders;
+        state.settings = settings;
+        state.scripts = scripts;
+        state.view = { type: "all", folderId: null };
+        state.selectedId = scripts.length ? scripts.slice().sort(function (a, b) { return b.updatedAt - a.updatedAt; })[0].id : null;
+        dirtyScripts = {}; deletedScriptIds = {}; libraryDirty = false; sessionEdited = false;
+        return true;
+      }
+      async function attachFolder(handle, silent) {
+        if (!handle) return false;
+        dirHandle = handle; dirName = handle.name || "Library";
+        var loaded = false;
+        try { loaded = await loadLibraryFromFolder(handle); } catch (e) { loaded = false; }
+        if (loaded) {
+          // local appearance settings win over folder copy for theme/accent
+          var localTheme = null;
+          try { var raw = localStorage.getItem(LS_SETTINGS); if (raw) localTheme = JSON.parse(raw); } catch(e) {}
+          if (localTheme) Object.keys(localTheme).forEach(function(k){ state.settings[k]=localTheme[k]; });
+          if (!silent) toast("Loaded your library from \u201c" + dirName + "\u201d");
+        } else {
+          state.scripts.forEach(function (s) { dirtyScripts[s.id] = true; });
+          libraryDirty = true;
+          await flushToFolder();
+          if (!silent) toast("Library folder set up in \u201c" + dirName + "\u201d — it will reopen automatically");
+        }
+        applySettings(); syncSettingsUI(); renderAll();
+        return true;
+      }
+      async function connectFolder() {
+        var nb = nativeBridge();
+        if (nb) {
+          var h = null;
+          try { h = await nb.chooseFolder(); } catch(e) {}
+          if (!h) return;
+          await attachFolder(h, false);
+          return;
+        }
+        if (!fsSupported()) {
+          openModal(
+            "<h2>Folder picking is not available here</h2>" +
+            "<p>Open this app in <strong>Chrome or Edge</strong>, or use the standalone desktop app, to pick a library folder. You can still use <strong>Export</strong> / <strong>Import</strong> below as a backup.</p>",
+            [{ label: "Got it", primary: true }]
+          );
+          return;
+        }
+        var handle;
+        try { handle = await window.showDirectoryPicker({ mode: "readwrite" }); } catch (e) { return; }
+        await idbSet("dirHandle", handle);
+        await attachFolder(handle, false);
+      }
+      async function disconnectFolder() {
+        var nb = nativeBridge();
+        if (nb) { try { await nb.clearSavedFolder(); } catch(e) {} }
+        await idbDel("dirHandle");
+        dirHandle = null; dirName = "";
+        renderAll();
+        toast("Disconnected. Pick a folder any time to reconnect — your files stay in the old folder.");
+      }
+      async function restoreSavedFolder() {
+        var nb = nativeBridge();
+        if (nb) {
+          try { var h = await nb.getSavedFolder(); if (h) { await attachFolder(h, true); toast("Reopened your library folder: " + dirName); return; } } catch(e) {}
+          return;
+        }
+        if (!fsSupported()) return;
+        try {
+          var saved = await idbGet("dirHandle");
+          if (!saved) return;
+          var perm = "prompt";
+          try { perm = await saved.queryPermission({ mode: "readwrite" }); } catch(e) {}
+          if (perm === "granted") { await attachFolder(saved, true); }
+          else {
+            // Show a one-click reconnect in the sidebar status
+            var el = document.querySelector("#lib-status");
+            if (el) el.innerHTML = "<strong>Your library folder is saved.</strong> Click <strong>Reconnect library folder</strong> below to reopen it (your browser asks once for permission).<br><br>Pick any folder on this computer. Your scripts live in that folder and the app will always open it, even after you close the app.";
+            var btn = document.querySelector("#connect-btn");
+            if (btn) { btn.dataset.reconnect = "1"; btn.textContent = "Reconnect library folder"; btn.onclick = async function(){ try { var rp = await saved.requestPermission({ mode: "readwrite" }); if (rp === "granted") await attachFolder(saved, false); } catch(e) {} }; }
+          }
+        } catch(e) {}
+      }
+
+      /* ================= Export / Import (single file) ================= */
+      function exportLibrary() {
+        var payload = {
+          app: "script-library", version: 1, exportedAt: Date.now(),
+          folders: state.folders, settings: state.settings, scripts: state.scripts
+        };
+        var blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement("a");
+        a.href = url;
+        a.download = "script-library.json";
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(function () { URL.revokeObjectURL(url); }, 4000);
+        lastExportAt = Date.now();
+        sessionEdited = false;
+        updateSaveStatus();
+        toast("Library exported as one file: script-library.json");
+      }
+      function importLibraryFile(file) {
+        var reader = new FileReader();
+        reader.onload = function () {
+          var data;
+          try { data = JSON.parse(String(reader.result)); } catch (e) { toast("That file isn't a valid library file."); return; }
+          if (!data || !Array.isArray(data.scripts)) { toast("That file doesn't look like a Script Library export."); return; }
+          var apply = function () {
+            state.folders = Array.isArray(data.folders) ? data.folders : [];
+            state.settings = data.settings || { wpm: 150 };
+            state.scripts = data.scripts.map(function (s) {
+              return {
+                id: s.id || uid(), title: s.title || "Untitled script", folderId: s.folderId || null,
+                favorite: !!s.favorite, createdAt: s.createdAt || Date.now(), updatedAt: s.updatedAt || Date.now(), body: s.body || ""
+              };
+            });
+            state.view = { type: "all", folderId: null };
+            state.selectedId = state.scripts.length ? state.scripts[0].id : null;
+            state.scripts.forEach(function (s) { dirtyScripts[s.id] = true; });
+            libraryDirty = true;
+            if (!dirHandle) sessionEdited = true;
+            scheduleFlush();
+            syncSettingsUI();
+            renderAll();
+            toast("Imported " + state.scripts.length + " script" + (state.scripts.length === 1 ? "" : "s"));
+          };
+          if (state.scripts.length > 1 || sessionEdited) {
+            openConfirmModal("Replace the current library?", "Importing replaces what's open right now with the file's contents (" + data.scripts.length + " scripts). Export first if you want a backup of the current library.", "Import and replace", apply);
+          } else apply();
+        };
+        reader.readAsText(file);
+      }
+
+      /* ================= Prompter ================= */
+      var promptState = { playing: false, raf: null, lastTs: 0, speed: 55, size: 40, mirrored: false };
+      function openPrompter() {
+        var s = scriptById(state.selectedId);
+        if (!s) return;
+        var tmp = document.createElement("div");
+        tmp.innerHTML = s.body || "";
+        var out = "";
+        tmp.childNodes.forEach(function (node) {
+          var t = (node.innerText || node.textContent || "").trim();
+          if (!t) return;
+          var cls = node.classList && node.classList.contains("show-line") ? ' class="show-line"' : "";
+          out += "<p" + cls + ">" + esc(t) + "</p>";
+        });
+        $("#prompt-text").innerHTML = out || "<p>(This script is empty.)</p>";
+        $("#prompt-title").textContent = s.title || "Untitled script";
+        applyPromptSize();
+        var el = $("#prompter");
+        el.hidden = false;
+        $("#prompt-scroll").scrollTop = 0;
+        setPromptPlaying(true);
+      }
+      function closePrompter() {
+        setPromptPlaying(false);
+        $("#prompter").hidden = true;
+      }
+      function applyPromptSize() {
+        $("#prompt-text").style.fontSize = promptState.size + "px";
+      }
+      function setPromptPlaying(on) {
+        promptState.playing = on;
+        $("#prompt-play").innerHTML = on ? icon("pause", 17) + " Pause" : icon("play", 17) + " Play";
+        if (on) {
+          promptState.lastTs = 0;
+          promptState.raf = requestAnimationFrame(promptTick);
+        } else if (promptState.raf) {
+          cancelAnimationFrame(promptState.raf);
+          promptState.raf = null;
+        }
+      }
+      function promptTick(ts) {
+        if (!promptState.playing) return;
+        if (promptState.lastTs) {
+          var dt = (ts - promptState.lastTs) / 1000;
+          var sc = $("#prompt-scroll");
+          sc.scrollTop += promptState.speed * dt;
+          if (sc.scrollTop + sc.clientHeight >= sc.scrollHeight - 4) { setPromptPlaying(false); return; }
+        }
+        promptState.lastTs = ts;
+        promptState.raf = requestAnimationFrame(promptTick);
+      }
+      function wirePrompter() {
+        $("#prompt-play").addEventListener("click", function () { setPromptPlaying(!promptState.playing); });
+        $("#prompt-restart").addEventListener("click", function () {
+          $("#prompt-scroll").scrollTop = 0;
+          setPromptPlaying(true);
+        });
+        $("#prompt-close").addEventListener("click", closePrompter);
+        $("#prompt-speed").addEventListener("input", function (e) { promptState.speed = Number(e.target.value); state.settings.promptSpeed = promptState.speed; saveLocalSettings(); });
+        $("#prompt-size").addEventListener("input", function (e) { promptState.size = Number(e.target.value); state.settings.promptSize = promptState.size; saveLocalSettings(); applyPromptSize(); });
+        $("#prompt-mirror").addEventListener("click", function () {
+          promptState.mirrored = !promptState.mirrored; state.settings.promptMirror = promptState.mirrored; saveLocalSettings();
+          $("#prompt-text").classList.toggle("mirrored", promptState.mirrored);
+        });
+        $("#prompt-scroll").addEventListener("click", function (e) {
+          if (e.target.closest(".prompt-bar")) return;
+          setPromptPlaying(!promptState.playing);
+        });
+        document.addEventListener("keydown", function (e) {
+          if ($("#prompter").hidden) return;
+          if (e.key === "Escape") closePrompter();
+          if (e.key === " " && e.target === document.body) { e.preventDefault(); setPromptPlaying(!promptState.playing); }
+        });
+      }
+
+      /* ================= Modals ================= */
+      function openModal(html, actions) {
+        var root = $("#modal-root");
+        var acts = (actions || [{ label: "Close", primary: true }]).map(function (a, i) {
+          return '<button class="btn' + (a.primary ? " primary" : "") + (a.danger ? " danger" : "") + '" data-act="' + i + '">' + esc(a.label) + "</button>";
+        }).join("");
+        root.innerHTML = '<div class="modal-back"></div><div class="modal-card" role="dialog" aria-modal="true">' + html +
+          '<div class="modal-actions">' + acts + "</div></div>";
+        root.classList.add("open");
+        root.querySelector(".modal-back").addEventListener("click", closeModal);
+        (actions || [{ label: "Close", primary: true }]).forEach(function (a, i) {
+          root.querySelector('[data-act="' + i + '"]').addEventListener("click", function () {
+            if (a.onClick) a.onClick();
+            if (!a.keepOpen) closeModal();
+          });
+        });
+        var firstInput = root.querySelector("input[type='text']");
+        if (firstInput) { firstInput.focus(); firstInput.select(); }
+      }
+      function closeModal() {
+        var root = $("#modal-root");
+        root.classList.remove("open");
+        root.innerHTML = "";
+      }
+      function openConfirmModal(title, body, confirmLabel, onConfirm) {
+        openModal("<h2>" + esc(title) + "</h2><p>" + esc(body) + "</p>", [
+          { label: "Cancel" },
+          { label: confirmLabel, danger: true, onClick: onConfirm }
+        ]);
+      }
+      function openLinkModal() {
+        openModal(
+          "<h2>Add a link</h2><p>Paste the URL for the selected text. For SHOW lines, this is where the exact source clip link goes.</p>" +
+          '<label class="flabel" for="link-url">URL</label><input type="text" id="link-url" placeholder="https://…" />',
+          [
+            { label: "Cancel" },
+            { label: "Add link", primary: true, onClick: function () {
+                var url = $("#link-url").value.trim();
+                if (url) { document.execCommand("createLink", false, url); syncBodyFromEditor(); }
+              } }
+          ]
+        );
+      }
+      function openNewScriptModal() {
+        var selTpl = "blank";
+        var folderOpts = '<option value="">Unfiled</option>' + state.folders.map(function (f) {
+          var sel = (state.view.type === "folder" && state.view.folderId === f.id) ? " selected" : "";
+          return '<option value="' + f.id + '"' + sel + ">" + esc(f.name) + "</option>";
+        }).join("");
+        openModal(
+          "<h2>New script</h2><p>Pick a starting format. You can change everything after it's created.</p>" +
+          '<div class="tpl-grid">' +
+          '<button class="tpl-card sel" data-tpl="blank"><span class="tt">Blank</span><span class="td">An empty page, ready to write.</span></button>' +
+          '<button class="tpl-card" data-tpl="primink"><span class="tt">Primink documentary</span><span class="td">Title options, thumbnail text, brief description, used media links, then the script.</span></button>' +
+          '<button class="tpl-card" data-tpl="globby"><span class="tt">Globby video</span><span class="td">Title and thumbnail options, the script with a SHOW line started, and a pinned comment jokes section.</span></button>' +
+          "</div>" +
+          '<label class="flabel" for="ns-title">Title</label><input type="text" id="ns-title" placeholder="Untitled script" />' +
+          '<label class="flabel" for="ns-folder">Folder</label><select id="ns-folder">' + folderOpts + "</select>",
+          [
+            { label: "Cancel" },
+            { label: "Create script", primary: true, onClick: function () {
+                var title = $("#ns-title").value.trim();
+                var folderId = $("#ns-folder").value || null;
+                var body = selTpl === "primink" ? priminkTemplate() : selTpl === "globby" ? globbyTemplate() : "<p></p>";
+                var s = createScript(title, folderId, body);
+                renderAll();
+                setTimeout(function () { $("#ed-body").focus(); }, 60);
+                return s;
+              } }
+          ]
+        );
+        document.querySelectorAll(".tpl-card").forEach(function (c) {
+          c.addEventListener("click", function () {
+            document.querySelectorAll(".tpl-card").forEach(function (x) { x.classList.remove("sel"); });
+            c.classList.add("sel");
+            selTpl = c.getAttribute("data-tpl");
+          });
+        });
+      }
+      function openFolderModal(folder) {
+        var isNew = !folder;
+        var selColor = folder ? folder.color : FOLDER_COLORS[state.folders.length % FOLDER_COLORS.length];
+        var swatches = FOLDER_COLORS.map(function (c) {
+          return '<button class="swatch' + (c === selColor ? " sel" : "") + '" data-color="' + c + '" style="background:' + c + '" aria-label="Folder color ' + c + '"></button>';
+        }).join("");
+        var actions = [{ label: "Cancel" }];
+        if (!isNew) {
+          actions.push({ label: "Delete folder", danger: true, onClick: function () {
+            state.scripts.forEach(function (s) { if (s.folderId === folder.id) { s.folderId = null; dirtyScripts[s.id] = true; } });
+            state.folders = state.folders.filter(function (f) { return f.id !== folder.id; });
+            if (state.view.type === "folder" && state.view.folderId === folder.id) state.view = { type: "all", folderId: null };
+            libraryDirty = true;
+            if (!dirHandle) sessionEdited = true;
+            scheduleFlush();
+            renderAll();
+            toast("Folder deleted. Its scripts are now Unfiled.");
+          } });
+        }
+        actions.push({ label: isNew ? "Create folder" : "Save", primary: true, onClick: function () {
+          var name = $("#folder-name").value.trim();
+          if (!name) { toast("Give the folder a name first."); return; }
+          if (isNew) {
+            state.folders.push({ id: uid(), name: name, color: selColor });
+          } else {
+            folder.name = name;
+            folder.color = selColor;
+          }
+          libraryDirty = true;
+          if (!dirHandle) sessionEdited = true;
+          scheduleFlush();
+          renderAll();
+        } });
+        openModal(
+          "<h2>" + (isNew ? "New folder" : "Edit folder") + "</h2>" +
+          (isNew ? "" : "<p>Deleting a folder doesn't delete its scripts. They become Unfiled.</p>") +
+          '<label class="flabel" for="folder-name">Name</label><input type="text" id="folder-name" value="' + esc(folder ? folder.name : "") + '" placeholder="Folder name" />' +
+          '<label class="flabel">Color</label><div class="swatches">' + swatches + "</div>",
+          actions
+        );
+        document.querySelectorAll(".swatch").forEach(function (sw) {
+          sw.addEventListener("click", function () {
+            document.querySelectorAll(".swatch").forEach(function (x) { x.classList.remove("sel"); });
+            sw.classList.add("sel");
+            selColor = sw.getAttribute("data-color");
+          });
+        });
+      }
+      function openHelpModal() {
+        openModal(
+          "<h2>How syncing works</h2>" +
+          "<p>Pick any folder on this computer. Your scripts live in that folder and the app will always open it, even after you close the app. Put the folder in Google Drive only if you want the same library on two computers.</p><p>Your library is a folder of plain files: a <strong>library.json</strong> index plus one small file per script in a <strong>scripts</strong> subfolder.</p>" +
+          '<ol class="help-steps">' +
+          "<li><strong>Local (simplest):</strong> make any folder, e.g. Documents / Script Library, and pick it once. Done — it reopens automatically forever.</li>" + "<li><strong>Two computers (optional):</strong> put that folder inside Google Drive instead, and pick the same folder on the other computer.</li>" +
+          "<li>On this computer, hit <strong>Connect library folder</strong> and pick that folder. Edits now save into it automatically as you write.</li>" +
+          "<li>On your other computer, open this app, hit <strong>Connect library folder</strong>, and pick the same synced folder. Your whole library loads.</li>" +
+          "<li>Write on whichever machine you like. Just let Drive finish syncing before switching, so the newest files land first.</li>" +
+          "</ol>" +
+          "<p><strong>No folder access?</strong> In browsers without folder picking, use Export and Import instead: Export downloads the entire library as one file, which you can keep in Drive and Import on the other machine.</p>" +
+          "<p><strong>Read times</strong> are estimated from word count at your speaking pace. Change the pace with the Pace menu above the script list; slower narration, lower number.</p>",
+          [{ label: "Done", primary: true }]
+        );
+      }
+
+
+      /* ================= Settings panel ================= */
+      function openSettings() {
+        var panel = $("#settings-panel");
+        var s = state.settings;
+        var accentHtml = ACCENTS.map(function(a){ return '<button class="accent-swatch' + (a.color===s.accent ? ' sel' : '') + '" data-accent="' + a.color + '" style="background:' + a.color + '" title="' + a.name + '" aria-label="Accent ' + a.name + '"></button>'; }).join("");
+        var updHtml = nativeBridge() ? '<label class="flabel">App updates</label><p style="margin:0">Version <strong id="set-version">…</strong> — updates download automatically in the background; you will be asked before anything installs.</p><div class="btn-row"><button class="btn" id="set-check-updates">Check for updates</button></div><p style="margin:4px 0 0" id="set-update-status"></p>' : '';
+        panel.innerHTML = '<div class="modal-back"></div><div class="modal-card" role="document"><h2>Settings</h2><p>Changes save automatically and stay after you close the app.</p>' +
+          '<div class="settings-grid">' +
+          '<label class="flabel">Appearance</label><div class="seg-row" id="set-theme-row">' +
+            '<button class="seg-btn' + (s.theme==="light" ? ' sel' : '') + '" data-theme-val="light">Light</button>' +
+            '<button class="seg-btn' + (s.theme==="dark" ? ' sel' : '') + '" data-theme-val="dark">Dark</button>' +
+            '<button class="seg-btn' + (s.theme==="system" ? ' sel' : '') + '" data-theme-val="system">System</button></div>' +
+          '<label class="flabel">Accent color</label><div class="accent-swatches">' + accentHtml + '</div>' +
+          '<label class="flabel" for="set-fontsize">Editor text size — <span id="set-fontsize-val">' + (s.editorFontSize||18.5) + 'px</span></label><input type="range" id="set-fontsize" min="15" max="24" step="0.5" value="' + (s.editorFontSize||18.5) + '" />' +
+          '<label class="flabel" for="set-wpm">Speaking pace (for read times)</label><select id="set-wpm">' + [120,130,140,150,160,170,180].map(function(w){ return '<option value="' + w + '"' + (Number(s.wpm)===w ? ' selected' : '') + '>' + w + ' words per minute</option>'; }).join("") + '</select>' +
+          '<label class="flabel">Library folder</label><p style="margin:0">' + (dirHandle ? 'Current folder: <strong>' + esc(dirName) + '</strong> — reopens automatically every launch.' : 'No folder chosen yet. Pick any folder on this computer; the app will always open it after that.') + '</p>' +
+          '<div class="btn-row"><button class="btn" id="set-change-folder">Use a different folder</button>' + (dirHandle ? '<button class="btn" id="set-disconnect">Disconnect</button>' : '') + '</div>' +
+          '<label class="flabel">Teleprompter defaults</label>' +
+          '<label class="flabel" for="set-pspeed" style="font-weight:400">Scroll speed — <span id="set-pspeed-val">' + (s.promptSpeed||55) + '</span></label><input type="range" id="set-pspeed" min="10" max="220" value="' + (s.promptSpeed||55) + '" />' +
+          '<label class="flabel" for="set-psize" style="font-weight:400">Text size — <span id="set-psize-val">' + (s.promptSize||40) + 'px</span></label><input type="range" id="set-psize" min="24" max="72" value="' + (s.promptSize||40) + '" />' +
+          '<label class="flabel">Mirror mode (for prompter glass)</label><div class="seg-row" id="set-mirror-row"><button class="seg-btn' + (!s.promptMirror ? ' sel' : '') + '" data-mirror="0">Off</button><button class="seg-btn' + (s.promptMirror ? ' sel' : '') + '" data-mirror="1">On — mirrored</button></div>' +
+          '<label class="flabel">Panels</label><div class="btn-row"><button class="btn" id="set-toggle-sidebar">Toggle library panel (Ctrl+B)</button><button class="btn" id="set-toggle-list">Toggle script list (Ctrl+Shift+B)</button></div><p style="margin:4px 0 0">Drag the thin handles between panels to resize them. Widths and collapsed state are remembered.</p>' +
+          updHtml +
+          '<label class="flabel">Backup</label><div class="btn-row"><button class="btn" id="set-export">Export backup file</button></div><p style="margin:4px 0 0">Export / Import is a backup option — your main library is the folder above.</p>' +
+          '</div><div class="modal-actions"><button class="btn primary" id="set-done">Done</button></div></div>';
+        panel.classList.add("open");
+        panel.querySelector(".modal-back").addEventListener("click", closeSettings);
+        panel.querySelector("#set-done").addEventListener("click", closeSettings);
+        panel.querySelectorAll("[data-theme-val]").forEach(function(b){ b.addEventListener("click", function(){ state.settings.theme = b.getAttribute("data-theme-val"); saveLocalSettings(); applySettings(); openSettings(); }); });
+        panel.querySelectorAll("[data-accent]").forEach(function(b){ b.addEventListener("click", function(){ state.settings.accent = b.getAttribute("data-accent"); saveLocalSettings(); applySettings(); openSettings(); renderAll(); }); });
+        panel.querySelector("#set-fontsize").addEventListener("input", function(e){ state.settings.editorFontSize = Number(e.target.value); document.querySelector("#set-fontsize-val").textContent = e.target.value + "px"; saveLocalSettings(); applySettings(); });
+        panel.querySelector("#set-wpm").addEventListener("change", function(e){ state.settings.wpm = Number(e.target.value); saveLocalSettings(); syncSettingsUI(); renderList(); var sc = scriptById(state.selectedId); if (sc) renderEditorMeta(sc); });
+        panel.querySelector("#set-pspeed").addEventListener("input", function(e){ state.settings.promptSpeed = Number(e.target.value); document.querySelector("#set-pspeed-val").textContent = e.target.value; saveLocalSettings(); applySettings(); });
+        panel.querySelector("#set-psize").addEventListener("input", function(e){ state.settings.promptSize = Number(e.target.value); document.querySelector("#set-psize-val").textContent = e.target.value + "px"; saveLocalSettings(); applySettings(); });
+        panel.querySelectorAll("[data-mirror]").forEach(function(b){ b.addEventListener("click", function(){ state.settings.promptMirror = b.getAttribute("data-mirror")==="1"; saveLocalSettings(); applySettings(); openSettings(); }); });
+        var cf = panel.querySelector("#set-change-folder"); if (cf) cf.addEventListener("click", function(){ closeSettings(); connectFolder(); });
+        var dc = panel.querySelector("#set-disconnect"); if (dc) dc.addEventListener("click", function(){ closeSettings(); disconnectFolder(); });
+        panel.querySelector("#set-toggle-sidebar").addEventListener("click", toggleSidebar);
+        panel.querySelector("#set-toggle-list").addEventListener("click", toggleList);
+        panel.querySelector("#set-export").addEventListener("click", exportLibrary);
+        var cu = panel.querySelector("#set-check-updates");
+        if (cu) {
+          var nb2 = nativeBridge();
+          nb2.getVersion().then(function(v){ var el = panel.querySelector("#set-version"); if (el) el.textContent = v; }).catch(function(){});
+          var syncUpd = function(st){ var el = panel.querySelector("#set-update-status"); if (el) el.textContent = updateStatusText(st); };
+          window.__updSettingsSync = syncUpd;
+          nb2.getUpdateState().then(syncUpd).catch(function(){});
+          cu.addEventListener("click", function(){ var el = panel.querySelector("#set-update-status"); if (el) el.textContent = "Checking…"; nb2.checkForUpdates().then(syncUpd).catch(function(){}); });
+        }
+      }
+      function closeSettings() { window.__updSettingsSync = null; var panel = $("#settings-panel"); panel.classList.remove("open"); panel.innerHTML = ""; }
+      /* ================= App updates ================= */
+      function updateStatusText(st) {
+        if (!st) return "";
+        switch (st.status) {
+          case "checking": return "Checking for updates…";
+          case "available": return "Update" + (st.version ? " v" + st.version : "") + " found, downloading…";
+          case "downloading": return "Downloading update" + (st.percent != null ? " — " + st.percent + "%" : "") + "…";
+          case "downloaded": return "Update" + (st.version ? " v" + st.version : "") + " is ready to install.";
+          case "none": return "You are on the latest version.";
+          case "error": return "Could not check for updates. Are you offline?";
+          default: return "";
+        }
+      }
+      (function wireUpdates() {
+        var nb = nativeBridge();
+        if (!nb || !nb.onUpdateStatus) return;
+        var banner = null;
+        function showBanner(st) {
+          if (!banner) {
+            banner = document.createElement("div");
+            banner.id = "update-banner";
+            banner.style.cssText = "position:fixed;left:50%;transform:translateX(-50%);bottom:18px;z-index:200;background:#1f2430;color:#f2f4f8;border:1px solid rgba(255,255,255,.18);border-radius:10px;box-shadow:0 8px 28px rgba(0,0,0,.3);padding:10px 14px;display:flex;gap:10px;align-items:center;font-size:14px;max-width:min(92vw,560px)";
+            document.body.appendChild(banner);
+          }
+          banner.innerHTML = "";
+          var msg = document.createElement("span"); msg.textContent = updateStatusText(st); banner.appendChild(msg);
+          if (st.status === "downloaded") {
+            var go = document.createElement("button"); go.textContent = "Restart & install";
+            go.style.cssText = "background:#3b82f6;color:#fff;border:0;border-radius:7px;padding:6px 12px;cursor:pointer;font-size:14px";
+            go.addEventListener("click", function(){ nb.installUpdate(); });
+            var later = document.createElement("button"); later.textContent = "Later";
+            later.style.cssText = "background:transparent;color:#f2f4f8;border:1px solid rgba(255,255,255,.35);border-radius:7px;padding:6px 12px;cursor:pointer;font-size:14px";
+            later.addEventListener("click", function(){ if (banner) { banner.remove(); banner = null; } });
+            banner.appendChild(go); banner.appendChild(later);
+          }
+        }
+        nb.onUpdateStatus(function(st) {
+          if (window.__updSettingsSync) window.__updSettingsSync(st);
+          if (st.status === "downloading" || st.status === "downloaded") showBanner(st);
+          else if (banner && st.status !== "available" && st.status !== "checking") { banner.remove(); banner = null; }
+        });
+      })();
+      /* ================= Drag resize ================= */
+      function wireResize(handleId, key) {
+        var h = document.getElementById(handleId); if (!h) return;
+        h.addEventListener("pointerdown", function(e){
+          e.preventDefault(); h.classList.add("dragging"); h.setPointerCapture(e.pointerId);
+          var startX = e.clientX; var startW = key==="sidebarW" ? layoutState.sidebarW : layoutState.listW;
+          function move(ev){ var nw = Math.max(180, Math.min(520, startW + (ev.clientX - startX))); layoutState[key]=nw; applyLayout(); }
+          function up(){ h.classList.remove("dragging"); h.removeEventListener("pointermove", move); h.removeEventListener("pointerup", up); saveLayout(); }
+          h.addEventListener("pointermove", move); h.addEventListener("pointerup", up);
+        });
+      }
+
+      /* ================= Toast ================= */
+      var toastTimer = null;
+      function toast(msg) {
+        var t = $("#toast");
+        t.textContent = msg;
+        t.classList.add("show");
+        if (toastTimer) clearTimeout(toastTimer);
+        toastTimer = setTimeout(function () { t.classList.remove("show"); }, 3200);
+      }
+
+      /* ================= Wiring / init ================= */
+      function syncSettingsUI() {
+        $("#wpm-sel").value = String(state.settings.wpm || 150);
+      }
+      function wireChrome() {
+        $("#connect-btn").innerHTML = icon("folderOpen", 16) + " Connect library folder";
+        $("#export-btn").innerHTML = icon("download", 15) + " Export";
+        $("#import-btn").innerHTML = icon("upload", 15) + " Import";
+        $("#add-folder-btn").innerHTML = icon("plus", 15);
+        $("#new-script-btn").innerHTML = icon("plus", 16) + " New";
+        $("#empty-new-btn").addEventListener("click", openNewScriptModal);
+        $("#search-icon").innerHTML = icon("search", 16);
+        $("#open-sidebar-btn").innerHTML = icon("menu", 19);
+        $("#back-btn").innerHTML = icon("chevL", 19);
+        $("#dup-btn").innerHTML = icon("copy", 17);
+        $("#dup-btn").title = "Duplicate script";
+        $("#del-btn").innerHTML = icon("trash", 17);
+        $("#del-btn").title = "Delete script";
+        $("#prompt-btn").innerHTML = icon("play", 15) + " Prompter";
+        $("#prompt-play").innerHTML = icon("pause", 17) + " Pause";
+
+        $("#connect-btn").addEventListener("click", function(e){ if (e.currentTarget.dataset && e.currentTarget.dataset.reconnect === "1") return; connectFolder(); });
+        var _cf = $("#change-folder-btn"); if (_cf) _cf.addEventListener("click", connectFolder);
+        var _dc = $("#disconnect-btn"); if (_dc) _dc.addEventListener("click", disconnectFolder);
+        var _sb = $("#settings-btn"); if (_sb) _sb.addEventListener("click", openSettings);
+        var _cs = $("#collapse-sidebar-btn"); if (_cs) _cs.addEventListener("click", toggleSidebar);
+        var _cl = $("#collapse-list-btn"); if (_cl) _cl.addEventListener("click", toggleList);
+        var _es = $("#expand-sidebar-btn"); if (_es) _es.addEventListener("click", function(){ layoutState.sidebarCollapsed=false; saveLayout(); applyLayout(); });
+        var _el = $("#expand-list-btn"); if (_el) _el.addEventListener("click", function(){ layoutState.listCollapsed=false; saveLayout(); applyLayout(); });
+        var _ec = $("#empty-connect-btn"); if (_ec) _ec.addEventListener("click", connectFolder);
+        document.addEventListener("keydown", function(e){
+          if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === "b") { e.preventDefault(); toggleList(); }
+          else if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === "b") { e.preventDefault(); toggleSidebar(); }
+          if (e.key === "Escape") closeSettings();
+        });
+        wireResize("resize-1", "sidebarW");
+        wireResize("resize-2", "listW");
+        $("#export-btn").addEventListener("click", exportLibrary);
+        $("#import-btn").addEventListener("click", function () { $("#import-file").click(); });
+        $("#import-file").addEventListener("change", function (e) {
+          if (e.target.files && e.target.files[0]) importLibraryFile(e.target.files[0]);
+          e.target.value = "";
+        });
+        $("#help-btn").addEventListener("click", openHelpModal);
+        $("#add-folder-btn").addEventListener("click", function () { openFolderModal(null); });
+        $("#new-script-btn").addEventListener("click", openNewScriptModal);
+        $("#open-sidebar-btn").addEventListener("click", function () {
+          document.getElementById("app").classList.add("show-sidebar");
+        });
+        document.getElementById("app").addEventListener("click", function (e) {
+          var app = document.getElementById("app");
+          if (app.classList.contains("show-sidebar") && !e.target.closest("#sidebar") && !e.target.closest("#open-sidebar-btn")) {
+            app.classList.remove("show-sidebar");
+          }
+        });
+        $("#search").addEventListener("input", function (e) {
+          state.search = e.target.value.trim();
+          renderList();
+        });
+        $("#sort-sel").addEventListener("change", function (e) {
+          state.sort = e.target.value;
+          renderList();
+        });
+        $("#wpm-sel").addEventListener("change", function (e) {
+          state.settings.wpm = Number(e.target.value) || 150;
+          saveLocalSettings();
+          libraryDirty = true;
+          if (!dirHandle) sessionEdited = true;
+          scheduleFlush();
+          renderList();
+          var s = scriptById(state.selectedId);
+          if (s) renderEditorMeta(s);
+        });
+        document.addEventListener("keydown", function (e) {
+          if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s") {
+            e.preventDefault();
+            if (dirHandle) { flushToFolder(); toast("Saved to library folder"); }
+            else exportLibrary();
+          }
+        });
+        // Never block closing: best-effort flush only, no prompt / cancel.
+        window.addEventListener("beforeunload", function () {
+          if (dirHandle && (libraryDirty || Object.keys(dirtyScripts).length)) { try { flushToFolder(); } catch(e) {} }
+        });
+      }
+
+      loadLocalSettings();
+      seedLibrary();
+      // re-apply local settings after seed (seed does not touch settings, but keep order safe)
+      loadLocalSettings();
+      wireChrome();
+      loadLayout();
+      applySettings();
+      buildToolbar();
+      wireEditor();
+      wirePrompter();
+      syncSettingsUI();
+      applySettings();
+      renderAll();
+      restoreSavedFolder();
+    </script>
+  </body>
+</html>
