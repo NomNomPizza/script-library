@@ -12,7 +12,11 @@ const fs = require('fs');
 exports.default = async function afterPack(context) {
   if (context.electronPlatformName !== 'darwin') return;
   const projectDir = context.packager.projectDir;
-  const appPath = path.join(context.appOutDir, 'Script Library.app');
+  // Find the bundle by extension: the app was renamed to Scripture in
+  // v1.6.0 and a hardcoded bundle name broke the build once already.
+  const bundleName = fs.readdirSync(context.appOutDir).find((n) => n.endsWith('.app'));
+  if (!bundleName) throw new Error('afterPack: no .app bundle found in ' + context.appOutDir);
+  const appPath = path.join(context.appOutDir, bundleName);
   const entitlements = path.join(projectDir, 'entitlements.plist');
 
   if (process.platform === 'darwin') {
