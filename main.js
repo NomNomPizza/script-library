@@ -19,6 +19,13 @@ let updateState = { status: 'idle', version: null, percent: null };
 let updatesWired = false;
 
 function pushUpdateState(patch) {
+  // A downloaded update is waiting for the user to install it. Later checks
+  // (the 6-hour recheck, or the user clicking "Check for updates" in
+  // Settings) can produce error / not-available results for the still-running
+  // old version; never let those overwrite the ready state, or the install
+  // banner in the renderer vanishes before it can be clicked. A genuinely
+  // newer update still lands, because it arrives as its own 'downloaded'.
+  if (updateState.status === 'downloaded' && patch.status && patch.status !== 'downloaded') return;
   updateState = { ...updateState, ...patch };
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send('updates:status', updateState);

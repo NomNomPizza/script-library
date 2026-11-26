@@ -1680,6 +1680,8 @@
         var nb = nativeBridge();
         if (!nb || !nb.onUpdateStatus) return;
         var banner = null;
+        var showingReady = false;     // the banner is showing a downloaded update
+        var dismissedVersion = null;  // the user clicked Later on this version
         function showBanner(st) {
           if (!banner) {
             banner = document.createElement("div");
@@ -1687,6 +1689,7 @@
             banner.style.cssText = "position:fixed;left:50%;transform:translateX(-50%);bottom:18px;z-index:200;background:#1f2430;color:#f2f4f8;border:1px solid rgba(255,255,255,.18);border-radius:10px;box-shadow:0 8px 28px rgba(0,0,0,.3);padding:10px 14px;display:flex;gap:10px;align-items:center;font-size:14px;max-width:min(92vw,560px)";
             document.body.appendChild(banner);
           }
+          showingReady = st.status === "downloaded";
           banner.innerHTML = "";
           var msg = document.createElement("span"); msg.textContent = updateStatusText(st); banner.appendChild(msg);
           if (st.status === "downloaded") {
@@ -1695,14 +1698,25 @@
             go.addEventListener("click", function(){ nb.installUpdate(); });
             var later = document.createElement("button"); later.textContent = "Later";
             later.style.cssText = "background:transparent;color:#f2f4f8;border:1px solid rgba(255,255,255,.35);border-radius:7px;padding:6px 12px;cursor:pointer;font-size:14px";
-            later.addEventListener("click", function(){ if (banner) { banner.remove(); banner = null; } });
+            later.addEventListener("click", function(){ dismissedVersion = st.version || dismissedVersion; if (banner) { banner.remove(); banner = null; } showingReady = false; });
             banner.appendChild(go); banner.appendChild(later);
           }
         }
         nb.onUpdateStatus(function(st) {
           if (window.__updSettingsSync) window.__updSettingsSync(st);
-          if (st.status === "downloading" || st.status === "downloaded") showBanner(st);
-          else if (banner && st.status !== "available" && st.status !== "checking") { banner.remove(); banner = null; }
+          if (st.status === "downloaded") {
+            // A downloaded update is ready. If the user already said Later
+            // for this exact version, stay quiet; a newer version still shows.
+            if (st.version && dismissedVersion && st.version === dismissedVersion) return;
+            showBanner(st);
+            return;
+          }
+          // Once the install banner is up it is sticky: rechecks and their
+          // error / not-available results must never remove or downgrade it.
+          // Only the user's own Later / Restart & install click dismisses it.
+          if (showingReady) return;
+          if (st.status === "downloading") showBanner(st);
+          else if (banner && st.status !== "available" && st.status !== "checking") { banner.remove(); banner = null; showingReady = false; }
         });
       })();
       /* ================= Drag resize ================= */
