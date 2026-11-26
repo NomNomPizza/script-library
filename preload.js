@@ -154,6 +154,9 @@ window.scriptLibraryNative = {
   async installUpdate() {
     return ipcRenderer.invoke('updates:install');
   },
+  async openReleasePage() {
+    return ipcRenderer.invoke('shell:openReleasePage');
+  },
   onUpdateStatus(cb) {
     ipcRenderer.on('updates:status', (_e, state) => cb(state));
   }

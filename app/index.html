@@ -1646,7 +1646,7 @@
         var panel = $("#settings-panel");
         var s = state.settings;
         var accentHtml = ACCENTS.map(function(a){ return '<button class="accent-swatch' + (a.color===s.accent ? ' sel' : '') + '" data-accent="' + a.color + '" style="background:' + a.color + '" title="' + a.name + '" aria-label="Accent ' + a.name + '"></button>'; }).join("");
-        var updHtml = nativeBridge() ? '<label class="flabel">App updates</label><p style="margin:0">Version <strong id="set-version">…</strong> — updates download automatically in the background; you will be asked before anything installs.</p><div class="btn-row"><button class="btn" id="set-check-updates">Check for updates</button></div><p style="margin:4px 0 0" id="set-update-status"></p>' : '';
+        var updHtml = nativeBridge() ? '<label class="flabel">App updates</label><p style="margin:0">Version <strong id="set-version">…</strong>. Updates download automatically in the background. When one is ready, install it here, or just close the app and it installs as it quits.</p><div class="btn-row"><button class="btn" id="set-check-updates">Check for updates</button><button class="btn" id="set-install-update" style="display:none">Restart &amp; install</button><button class="btn" id="set-download-update">Download manually</button></div><p style="margin:4px 0 0" id="set-update-status"></p>' : '';
         panel.innerHTML = '<div class="modal-back"></div><div class="modal-card" role="document"><h2>Settings</h2><p>Changes save automatically and stay after you close the app.</p>' +
           '<div class="settings-grid">' +
           '<label class="flabel">Appearance</label><div class="seg-row" id="set-theme-row">' +
@@ -1687,16 +1687,24 @@
         if (cu) {
           var nb2 = nativeBridge();
           nb2.getVersion().then(function(v){ var el = panel.querySelector("#set-version"); if (el) el.textContent = v; }).catch(function(){});
-          var syncUpd = function(st){ var el = panel.querySelector("#set-update-status"); if (el) el.textContent = updateStatusText(st); };
+          var syncUpd = function(st){
+            var el = panel.querySelector("#set-update-status"); if (el) el.textContent = updateStatusText(st);
+            var ib = panel.querySelector("#set-install-update"); if (ib) ib.style.display = (st && st.status === "downloaded") ? "" : "none";
+          };
           window.__updSettingsSync = syncUpd;
           nb2.getUpdateState().then(syncUpd).catch(function(){});
           cu.addEventListener("click", function(){ var el = panel.querySelector("#set-update-status"); if (el) el.textContent = "Checking…"; nb2.checkForUpdates().then(syncUpd).catch(function(){}); });
+          var ib2 = panel.querySelector("#set-install-update");
+          if (ib2) ib2.addEventListener("click", function(){ ib2.disabled = true; ib2.textContent = "Restarting…"; nb2.installUpdate(); });
+          var dlb = panel.querySelector("#set-download-update");
+          if (dlb) dlb.addEventListener("click", function(){ if (nb2.openReleasePage) nb2.openReleasePage(); });
         }
       }
       function closeSettings() { window.__updSettingsSync = null; var panel = $("#settings-panel"); panel.classList.remove("open"); panel.innerHTML = ""; }
       /* ================= App updates ================= */
       function updateStatusText(st) {
         if (!st) return "";
+        if (st.installError) return "Update" + (st.version ? " v" + st.version : "") + " is ready to install, but the last install attempt hit a problem: " + st.installError;
         switch (st.status) {
           case "checking": return "Checking for updates…";
           case "available": return "Update" + (st.version ? " v" + st.version : "") + " found, downloading…";
@@ -1722,15 +1730,29 @@
           }
           showingReady = st.status === "downloaded";
           banner.innerHTML = "";
-          var msg = document.createElement("span"); msg.textContent = updateStatusText(st); banner.appendChild(msg);
+          banner.style.flexWrap = st.installError ? "wrap" : "nowrap";
+          var msg = document.createElement("span"); msg.textContent = st.installError ? ("Update" + (st.version ? " v" + st.version : "") + " is ready to install.") : updateStatusText(st); banner.appendChild(msg);
           if (st.status === "downloaded") {
+            if (st.installError) {
+              var errSpan = document.createElement("span");
+              errSpan.textContent = "The last install attempt hit a problem: " + st.installError;
+              errSpan.style.cssText = "flex:1 1 100%;font-size:12.5px;color:#fca5a5";
+              banner.appendChild(errSpan);
+            }
             var go = document.createElement("button"); go.textContent = "Restart & install";
             go.style.cssText = "background:#3b82f6;color:#fff;border:0;border-radius:7px;padding:6px 12px;cursor:pointer;font-size:14px";
-            go.addEventListener("click", function(){ nb.installUpdate(); });
+            go.addEventListener("click", function(){ go.disabled = true; go.textContent = "Restarting…"; nb.installUpdate(); });
+            banner.appendChild(go);
+            if (st.installError && nb.openReleasePage) {
+              var dl = document.createElement("button"); dl.textContent = "Download manually";
+              dl.style.cssText = "background:transparent;color:#f2f4f8;border:1px solid rgba(255,255,255,.35);border-radius:7px;padding:6px 12px;cursor:pointer;font-size:14px";
+              dl.addEventListener("click", function(){ nb.openReleasePage(); });
+              banner.appendChild(dl);
+            }
             var later = document.createElement("button"); later.textContent = "Later";
             later.style.cssText = "background:transparent;color:#f2f4f8;border:1px solid rgba(255,255,255,.35);border-radius:7px;padding:6px 12px;cursor:pointer;font-size:14px";
             later.addEventListener("click", function(){ dismissedVersion = st.version || dismissedVersion; if (banner) { banner.remove(); banner = null; } showingReady = false; });
-            banner.appendChild(go); banner.appendChild(later);
+            banner.appendChild(later);
           }
         }
         nb.onUpdateStatus(function(st) {
