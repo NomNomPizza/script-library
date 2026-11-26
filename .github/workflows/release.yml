@@ -39,3 +39,45 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npx electron-builder --mac --publish always
+
+  # electron-builder stages uploads as draft releases and the two build jobs
+  # can split assets across duplicate drafts for the same tag. This job runs
+  # last: it merges everything into one release for the tag and publishes it,
+  # so a release only becomes public once it is complete.
+  finalize:
+    needs: [windows, mac]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Consolidate and publish the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          IDS=$(gh api "repos/$REPO/releases?per_page=100" --jq "[.[] | select(.tag_name == \"$TAG\")] | sort_by(.id) | .[].id")
+          if [ -z "$IDS" ]; then echo "No release found for $TAG"; exit 1; fi
+          CANON=$(echo "$IDS" | head -1)
+          HAVE=$(gh api "repos/$REPO/releases/$CANON/assets" --jq '.[].name')
+          for ID in $IDS; do
+            if [ "$ID" != "$CANON" ]; then
+              for AID in $(gh api "repos/$REPO/releases/$ID/assets" --jq '.[].id'); do
+                NAME=$(gh api "repos/$REPO/releases/assets/$AID" --jq '.name')
+                if echo "$HAVE" | grep -qx "$NAME"; then continue; fi
+                gh api "repos/$REPO/releases/assets/$AID" -H "Accept: application/octet-stream" > "/tmp/$NAME"
+                curl -s -H "Authorization: Bearer $GH_TOKEN" -H "Content-Type: application/octet-stream" --data-binary "@/tmp/$NAME" "https://uploads.github.com/repos/$REPO/releases/$CANON/assets?name=$NAME" > /dev/null
+                echo "Moved $NAME into release $CANON"
+              done
+              gh api -X DELETE "repos/$REPO/releases/$ID"
+              echo "Deleted duplicate release $ID"
+            fi
+          done
+          gh api -X PATCH "repos/$REPO/releases/$CANON" \
+            -f name="Script Library $TAG" \
+            -f body="Windows: download the Setup exe and run it. Windows may show a SmartScreen warning because the app is not code signed yet; choose More info, then Run anyway.
+
+          Mac (Apple Silicon): download the arm64-mac zip, unzip it, and move Script Library to your Applications folder. On first launch, if macOS says it cannot be opened, right-click the app and choose Open.
+
+          The app checks this page for new versions on launch and again every 6 hours, downloads updates in the background, and offers a one-click restart to install them." \
+            -F draft=false > /dev/null
+          echo "Published Script Library $TAG"
