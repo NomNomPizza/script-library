@@ -478,17 +478,6 @@
               <option value="longest">Longest read</option>
               <option value="shortest">Shortest read</option>
             </select>
-            <span class="spacer"></span>
-            <label style="font-size:12.5px;color:var(--muted)" for="wpm-sel">Pace</label>
-            <select id="wpm-sel" title="Speaking pace used for read-time estimates">
-              <option value="120">120 wpm</option>
-              <option value="130">130 wpm</option>
-              <option value="140">140 wpm</option>
-              <option value="150">150 wpm</option>
-              <option value="160">160 wpm</option>
-              <option value="170">170 wpm</option>
-              <option value="180">180 wpm</option>
-            </select>
           </div>
         </div>
         <div id="script-list" role="listbox" aria-label="Script list"></div>
@@ -989,7 +978,7 @@
         main.style.display = "flex";
         var titleEl = $("#ed-title"), bodyEl = $("#ed-body");
         if (document.activeElement !== titleEl) titleEl.textContent = s.title;
-        if (document.activeElement !== bodyEl && bodyEl.innerHTML !== s.body) bodyEl.innerHTML = s.body;
+        if (document.activeElement !== bodyEl && bodyEl.innerHTML !== s.body) bodyEl.innerHTML = stripTextColors(s.body);
         renderEditorMeta(s);
       }
 
@@ -1120,6 +1109,33 @@
         });
       }
       var bodySyncTimer = null;
+      /* Pasted or imported text often carries its own text colors (Google
+         Docs pastes black text, which is invisible in dark mode). Strip
+         inline text and background colors so script text always uses the
+         editor's theme color. The app's own colored elements (blue SHOW
+         lines, links) are styled by CSS classes, never inline, so they
+         are not affected. */
+      function cleanElementColors(root) {
+        root.querySelectorAll("style, meta, title").forEach(function (n) { n.remove(); });
+        root.querySelectorAll("*").forEach(function (el) {
+          if (el.style) {
+            el.style.removeProperty("color");
+            el.style.removeProperty("background-color");
+            el.style.removeProperty("background");
+          }
+          if (el.hasAttribute && el.hasAttribute("color")) el.removeAttribute("color");
+          if (el.hasAttribute && el.hasAttribute("bgcolor")) el.removeAttribute("bgcolor");
+          if (el.getAttribute && el.getAttribute("style") === "") el.removeAttribute("style");
+        });
+      }
+      function stripTextColors(html) {
+        if (!html) return html;
+        if (html.indexOf("color") === -1 && html.indexOf("bgcolor") === -1) return html;
+        var box = document.createElement("div");
+        box.innerHTML = html;
+        cleanElementColors(box);
+        return box.innerHTML;
+      }
       function syncBodyFromEditor() {
         var s = scriptById(state.selectedId);
         if (!s) return;
@@ -1154,6 +1170,21 @@
           document.execCommand("insertText", false, t.replace(/\s+/g, " "));
         });
         bodyEl.addEventListener("input", syncBodyFromEditor);
+        bodyEl.addEventListener("paste", function (e) {
+          var cd = e.clipboardData || window.clipboardData;
+          if (!cd) return;
+          var html = "";
+          try { html = cd.getData("text/html"); } catch (err) {}
+          if (!html) return; // plain-text paste: let the default happen
+          e.preventDefault();
+          document.execCommand("insertHTML", false, stripTextColors(html));
+          // insertHTML also stamps the inserted inline content with the
+          // current theme color as an inline style. Strip those again and
+          // save the clean version, so a later theme switch cannot strand
+          // the pasted text in the wrong color.
+          cleanElementColors(bodyEl);
+          syncBodyFromEditor();
+        });
         $("#fav-btn").addEventListener("click", function () {
           var s = scriptById(state.selectedId);
           if (!s) return;
@@ -1743,7 +1774,8 @@
 
       /* ================= Wiring / init ================= */
       function syncSettingsUI() {
-        $("#wpm-sel").value = String(state.settings.wpm || 150);
+        // The pace control lives in Settings now; nothing in the list
+        // header mirrors it anymore. Kept as a no-op for existing callers.
       }
       function wireChrome() {
         $("#connect-btn").innerHTML = icon("folderOpen", 16) + " Connect library folder";
@@ -1800,16 +1832,7 @@
           state.sort = e.target.value;
           renderList();
         });
-        $("#wpm-sel").addEventListener("change", function (e) {
-          state.settings.wpm = Number(e.target.value) || 150;
-          saveLocalSettings();
-          libraryDirty = true;
-          if (!dirHandle) sessionEdited = true;
-          scheduleFlush();
-          renderList();
-          var s = scriptById(state.selectedId);
-          if (s) renderEditorMeta(s);
-        });
+
         document.addEventListener("keydown", function (e) {
           if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s") {
             e.preventDefault();
