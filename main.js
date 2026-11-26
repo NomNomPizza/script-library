@@ -458,6 +458,64 @@ app.whenReady().then(() => {
     } catch { /* non-fatal */ }
   });
 
+  // ---- automatic local backup mirror ----
+  // The user picks a second folder (kept outside the synced library
+  // folder); after every save the renderer sends the full serialized
+  // library and this process keeps the backup folder identical to it.
+  ipcMain.handle('backup:get', () => {
+    const p = readSettings().backupLibrary;
+    return p ? { path: p, name: path.basename(p) } : null;
+  });
+
+  ipcMain.handle('backup:choose', async () => {
+    const current = readSettings();
+    const result = await dialog.showOpenDialog({
+      title: 'Choose a folder for the automatic local backup',
+      properties: ['openDirectory', 'createDirectory'],
+      defaultPath: current.backupLibrary && fs.existsSync(current.backupLibrary) ? current.backupLibrary : undefined
+    });
+    if (result.canceled || !result.filePaths.length) return null;
+    const picked = result.filePaths[0];
+    if (current.lastLibrary && path.resolve(picked) === path.resolve(current.lastLibrary)) {
+      return { error: 'That is your library folder itself. Pick a different folder, so the backup stays a separate copy.' };
+    }
+    writeSettings({ backupLibrary: picked });
+    return { path: picked, name: path.basename(picked) };
+  });
+
+  ipcMain.handle('backup:clear', async () => {
+    const settings = readSettings();
+    delete settings.backupLibrary;
+    try {
+      fs.mkdirSync(path.dirname(settingsPath()), { recursive: true });
+      fs.writeFileSync(settingsPath(), JSON.stringify(settings, null, 2));
+    } catch { /* non-fatal */ }
+    return true;
+  });
+
+  ipcMain.handle('backup:mirror', async (_e, payload) => {
+    const dir = readSettings().backupLibrary;
+    if (!dir || !payload) return { ok: false };
+    const lib = readSettings().lastLibrary;
+    if (lib && path.resolve(lib) === path.resolve(dir)) return { ok: false };
+    const scriptsDir = path.join(dir, 'scripts');
+    await fs.promises.mkdir(scriptsDir, { recursive: true });
+    await fs.promises.writeFile(path.join(dir, 'library.json'), String(payload.library || ''));
+    const keep = new Set();
+    for (const item of payload.scripts || []) {
+      if (!item || !item.id) continue;
+      keep.add(item.id + '.json');
+      await fs.promises.writeFile(path.join(scriptsDir, item.id + '.json'), String(item.json || ''));
+    }
+    const existing = await fs.promises.readdir(scriptsDir);
+    for (const name of existing) {
+      if (name.endsWith('.json') && !keep.has(name)) {
+        await fs.promises.rm(path.join(scriptsDir, name), { force: true });
+      }
+    }
+    return { ok: true };
+  });
+
   ipcMain.handle('app:getVersion', () => app.getVersion());
 
   // Manual fallback for updates: open the GitHub releases page.

@@ -141,6 +141,19 @@ window.scriptLibraryNative = {
   async clearSavedFolder() {
     await ipcRenderer.invoke('library:clear');
   },
+  // ---- automatic local backup mirror ----
+  async getBackupFolder() {
+    return ipcRenderer.invoke('backup:get');
+  },
+  async chooseBackupFolder() {
+    return ipcRenderer.invoke('backup:choose');
+  },
+  async clearBackupFolder() {
+    return ipcRenderer.invoke('backup:clear');
+  },
+  async mirrorBackup(payload) {
+    return ipcRenderer.invoke('backup:mirror', payload);
+  },
   // ---- auto-update bridge (main process owns electron-updater) ----
   async getVersion() {
     return ipcRenderer.invoke('app:getVersion');

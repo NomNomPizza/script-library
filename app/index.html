@@ -1251,9 +1251,49 @@
           }
           sessionEdited = false;
           updateSaveStatus();
+          scheduleMirror();
         } catch (err) {
           toast("Couldn't save to the library folder. It may have been moved or permission was revoked.");
         }
+      }
+      /* ---- automatic local backup mirror (standalone app only) ----
+         When the user has picked a backup folder in Settings, every save
+         to the library folder is followed by a full mirror of the library
+         to that second folder, kept identical by the main process. */
+      var backupInfo = null;      // { path, name } when a backup folder is set
+      var lastMirrorAt = 0;
+      var mirrorTimer = null;
+      function mirrorPayload() {
+        return {
+          library: libraryIndexJSON(),
+          scripts: state.scripts.map(function (s) { return { id: s.id, json: scriptFileJSON(s) }; })
+        };
+      }
+      function scheduleMirror() {
+        var nb = nativeBridge();
+        if (!nb || !nb.mirrorBackup || !backupInfo) return;
+        if (mirrorTimer) clearTimeout(mirrorTimer);
+        mirrorTimer = setTimeout(async function () {
+          try {
+            var res = await nb.mirrorBackup(mirrorPayload());
+            if (res && res.ok) {
+              lastMirrorAt = Date.now();
+              var el = document.querySelector("#set-backup-status");
+              if (el) el.textContent = backupStatusText();
+            }
+          } catch (e) { /* a failed backup must never interrupt writing */ }
+        }, 1200);
+      }
+      async function initBackupMirror() {
+        var nb = nativeBridge();
+        if (!nb || !nb.getBackupFolder) return;
+        try { backupInfo = await nb.getBackupFolder(); } catch (e) { backupInfo = null; }
+        if (backupInfo) scheduleMirror();
+      }
+      function backupStatusText() {
+        if (!backupInfo) return "Off — no backup folder chosen.";
+        var when = lastMirrorAt ? (" Last updated " + new Date(lastMirrorAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) + ".") : " It updates automatically every time you save.";
+        return "On — mirroring to \u201C" + backupInfo.name + "\u201D." + when;
       }
       async function loadLibraryFromFolder(handle) {
         var index = null;
@@ -1311,6 +1351,7 @@
           if (!silent) toast("Library folder set up in \u201c" + dirName + "\u201d — it will reopen automatically");
         }
         applySettings(); syncSettingsUI(); renderAll();
+        initBackupMirror();
         return true;
       }
       async function connectFolder() {
@@ -1635,7 +1676,7 @@
           "<li>Write on whichever machine you like. Just let Drive finish syncing before switching, so the newest files land first.</li>" +
           "</ol>" +
           "<p><strong>No folder access?</strong> In browsers without folder picking, use Export and Import instead: Export downloads the entire library as one file, which you can keep in Drive and Import on the other machine.</p>" +
-          "<p><strong>Read times</strong> are estimated from word count at your speaking pace. Change the pace with the Pace menu above the script list; slower narration, lower number.</p>",
+          "<p><strong>Read times</strong> are estimated from word count at your speaking pace. Change the pace in Settings; slower narration, lower number.</p>",
           [{ label: "Done", primary: true }]
         );
       }
@@ -1646,6 +1687,7 @@
         var panel = $("#settings-panel");
         var s = state.settings;
         var accentHtml = ACCENTS.map(function(a){ return '<button class="accent-swatch' + (a.color===s.accent ? ' sel' : '') + '" data-accent="' + a.color + '" style="background:' + a.color + '" title="' + a.name + '" aria-label="Accent ' + a.name + '"></button>'; }).join("");
+        var bkHtml = nativeBridge() ? '<label class="flabel">Local backup copy</label><p style="margin:0" id="set-backup-status">Checking…</p><div class="btn-row"><button class="btn" id="set-backup-choose">Choose backup folder</button><button class="btn" id="set-backup-off" style="display:none">Turn off</button></div><p style="margin:4px 0 0">A full second copy of your library in a folder on this computer, outside Google Drive, updated automatically every time you save.</p>' : '';
         var updHtml = nativeBridge() ? '<label class="flabel">App updates</label><p style="margin:0">Version <strong id="set-version">…</strong>. Updates download automatically in the background. When one is ready, install it here, or just close the app and it installs as it quits.</p><div class="btn-row"><button class="btn" id="set-check-updates">Check for updates</button><button class="btn" id="set-install-update" style="display:none">Restart &amp; install</button><button class="btn" id="set-download-update">Download manually</button></div><p style="margin:4px 0 0" id="set-update-status"></p>' : '';
         panel.innerHTML = '<div class="modal-back"></div><div class="modal-card" role="document"><h2>Settings</h2><p>Changes save automatically and stay after you close the app.</p>' +
           '<div class="settings-grid">' +
@@ -1665,6 +1707,7 @@
           '<label class="flabel">Panels</label><div class="btn-row"><button class="btn" id="set-toggle-sidebar">Toggle library panel (Ctrl+B)</button><button class="btn" id="set-toggle-list">Toggle script list (Ctrl+Shift+B)</button></div><p style="margin:4px 0 0">Or use the arrow tabs on the panels\' right edges. Drag the thin handles between panels to resize them; panels stop before they get narrow enough to squeeze their content. Widths and collapsed state are remembered.</p>' +
           updHtml +
           '<label class="flabel">Backup</label><div class="btn-row"><button class="btn" id="set-export">Export backup file</button><button class="btn" id="set-import">Import backup file</button></div><p style="margin:4px 0 0">Export / Import is a backup option — your main library is the folder above.</p>' +
+          bkHtml +
           '</div><div class="modal-actions"><button class="btn primary" id="set-done">Done</button></div></div>';
         panel.classList.add("open");
         panel.querySelector(".modal-back").addEventListener("click", closeSettings);
@@ -1682,6 +1725,29 @@
         panel.querySelector("#set-toggle-list").addEventListener("click", toggleList);
         panel.querySelector("#set-export").addEventListener("click", exportLibrary);
         var si = panel.querySelector("#set-import"); if (si) si.addEventListener("click", function(){ $("#import-file").click(); });
+        var bcBtn = panel.querySelector("#set-backup-choose");
+        if (bcBtn) {
+          var nb3 = nativeBridge();
+          var renderBk = function () {
+            var el = panel.querySelector("#set-backup-status"); if (el) el.textContent = backupStatusText();
+            var off = panel.querySelector("#set-backup-off"); if (off) off.style.display = backupInfo ? "" : "none";
+            bcBtn.textContent = backupInfo ? "Use a different backup folder" : "Choose backup folder";
+          };
+          if (backupInfo) renderBk();
+          else nb3.getBackupFolder().then(function (info) { backupInfo = info; renderBk(); }).catch(function () { renderBk(); });
+          bcBtn.addEventListener("click", async function () {
+            var res = null;
+            try { res = await nb3.chooseBackupFolder(); } catch (e) {}
+            if (res && res.error) { toast(res.error); return; }
+            if (res) { backupInfo = res; lastMirrorAt = 0; renderBk(); scheduleMirror(); toast("Local backup on — a copy of your library will be kept in \u201C" + res.name + "\u201D."); }
+          });
+          var boff = panel.querySelector("#set-backup-off");
+          if (boff) boff.addEventListener("click", async function () {
+            try { await nb3.clearBackupFolder(); } catch (e) {}
+            backupInfo = null; renderBk();
+            toast("Local backup turned off. The existing copy stays where it is.");
+          });
+        }
         var sh = panel.querySelector("#set-help"); if (sh) sh.addEventListener("click", function(){ closeSettings(); openHelpModal(); });
         var cu = panel.querySelector("#set-check-updates");
         if (cu) {
