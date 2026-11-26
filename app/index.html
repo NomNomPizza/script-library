@@ -86,12 +86,32 @@
       #app.list-collapsed #listpane { display: none; }
       #app.list-collapsed #resize-2 { display: none; }
       #app.sidebar-collapsed.list-collapsed { grid-template-columns: 0 0 0 0 minmax(0, 1fr); }
+      /* Explicit placement for every pane. Without it, hiding a panel with
+         display:none lets the remaining panes slide into the wrong columns
+         (including the zero-width ones) and the whole layout collapses. */
+      #sidebar { grid-column: 1; }
+      #resize-1 { grid-column: 2; }
+      #listpane { grid-column: 3; }
+      #resize-2 { grid-column: 4; }
+      #editorpane { grid-column: 5; }
       .resize-handle { cursor: col-resize; background: transparent; position: relative; z-index: 5; touch-action: none; }
       .resize-handle::after { content: ""; position: absolute; inset: 0 2px; border-radius: 99px; }
       .resize-handle:hover::after, .resize-handle.dragging::after { background: var(--accent); opacity: .55; }
       .expand-strip { display: none; align-items: center; gap: 6px; padding: 10px 14px 0; flex-wrap: wrap; }
       #app.sidebar-collapsed .expand-strip, #app.list-collapsed .expand-strip { display: flex; }
       .expand-strip .btn { min-height: 32px; font-size: 12.5px; }
+
+      /* ---------- First-run welcome ---------- */
+      #welcome { position: fixed; inset: 0; z-index: 95; display: none; align-items: center; justify-content: center; background: var(--bg); padding: 24px; overflow-y: auto; }
+      #welcome.open { display: flex; }
+      .welcome-card { width: min(520px, 100%); background: var(--surface); border: 1px solid var(--line); border-radius: 16px; box-shadow: var(--shadow); padding: 30px 30px 24px; }
+      .welcome-card h1 { font-size: 24px; margin: 0 0 6px; letter-spacing: -0.01em; color: var(--ink); }
+      .welcome-card .sub { color: var(--muted); font-size: 14px; line-height: 1.55; margin: 0 0 20px; }
+      .welcome-choice { display: block; width: 100%; text-align: left; border: 1px solid var(--line); background: var(--bg); border-radius: 12px; padding: 16px 18px; margin: 0 0 12px; color: var(--ink); cursor: pointer; }
+      .welcome-choice:hover { border-color: var(--accent); }
+      .welcome-choice strong { display: block; font-size: 16px; margin-bottom: 3px; }
+      .welcome-choice span { font-size: 13.5px; color: var(--muted); line-height: 1.5; }
+      .welcome-skip { display: block; margin: 14px auto 0; background: none; border: 0; color: var(--muted); font-size: 13px; text-decoration: underline; min-height: 32px; cursor: pointer; }
 
       /* ---------- Sidebar ---------- */
       #sidebar {
@@ -368,6 +388,7 @@
       #settings-panel .modal-card { width: min(560px, calc(100vw - 32px)); }
       @media (max-width: 820px) {
         #app { grid-template-columns: minmax(0, 1fr) !important; }
+        #sidebar, #resize-1, #listpane, #resize-2, #editorpane { grid-column: auto; }
         .resize-handle { display: none !important; }
         #sidebar { display: none; }
         #app.show-sidebar #sidebar {
@@ -521,6 +542,21 @@
     <div id="settings-panel" role="dialog" aria-modal="true" aria-label="Settings"></div>
     <div id="modal-root"></div>
     <div id="toast" role="status"></div>
+    <div id="welcome" role="dialog" aria-modal="true" aria-label="Set up your library">
+      <div class="welcome-card">
+        <h1>Script Library</h1>
+        <p class="sub">Your scripts live in one library folder on this computer. Set it up once and the app reopens it automatically from then on. Put the folder inside Google Drive if you want the same library on your PC and your Mac.</p>
+        <button class="welcome-choice" id="welcome-create">
+          <strong>Create a new library</strong>
+          <span>Pick a folder and the app sets up a fresh library there, with your Primink, Globby, Sponsor reads and Ideas folders ready to go.</span>
+        </button>
+        <button class="welcome-choice" id="welcome-open">
+          <strong>Open an existing library</strong>
+          <span>Already have a library folder on this computer or in Google Drive? Pick it and everything loads as you left it.</span>
+        </button>
+        <button class="welcome-skip" id="welcome-skip">Not now, look around first</button>
+      </div>
+    </div>
     <input type="file" id="import-file" accept=".json,application/json" hidden />
 
     <script>
@@ -1192,9 +1228,8 @@
         if (nb) {
           var h = null;
           try { h = await nb.chooseFolder(); } catch(e) {}
-          if (!h) return;
-          await attachFolder(h, false);
-          return;
+          if (!h) return false;
+          return await attachFolder(h, false);
         }
         if (!fsSupported()) {
           openModal(
@@ -1202,42 +1237,47 @@
             "<p>Open this app in <strong>Chrome or Edge</strong>, or use the standalone desktop app, to pick a library folder. You can still use <strong>Export</strong> / <strong>Import</strong> below as a backup.</p>",
             [{ label: "Got it", primary: true }]
           );
-          return;
+          return false;
         }
         var handle;
-        try { handle = await window.showDirectoryPicker({ mode: "readwrite" }); } catch (e) { return; }
+        try { handle = await window.showDirectoryPicker({ mode: "readwrite" }); } catch (e) { return false; }
         await idbSet("dirHandle", handle);
-        await attachFolder(handle, false);
+        return await attachFolder(handle, false);
       }
+      function showWelcome() { var w = document.getElementById("welcome"); if (w) w.classList.add("open"); }
+      function hideWelcome() { var w = document.getElementById("welcome"); if (w) w.classList.remove("open"); }
       async function disconnectFolder() {
         var nb = nativeBridge();
         if (nb) { try { await nb.clearSavedFolder(); } catch(e) {} }
         await idbDel("dirHandle");
         dirHandle = null; dirName = "";
         renderAll();
+        showWelcome();
         toast("Disconnected. Pick a folder any time to reconnect — your files stay in the old folder.");
       }
       async function restoreSavedFolder() {
         var nb = nativeBridge();
         if (nb) {
-          try { var h = await nb.getSavedFolder(); if (h) { await attachFolder(h, true); toast("Reopened your library folder: " + dirName); return; } } catch(e) {}
-          return;
+          try { var h = await nb.getSavedFolder(); if (h) { await attachFolder(h, true); toast("Reopened your library folder: " + dirName); return "attached"; } } catch(e) {}
+          return "none";
         }
-        if (!fsSupported()) return;
+        if (!fsSupported()) return "none";
         try {
           var saved = await idbGet("dirHandle");
-          if (!saved) return;
+          if (!saved) return "none";
           var perm = "prompt";
           try { perm = await saved.queryPermission({ mode: "readwrite" }); } catch(e) {}
-          if (perm === "granted") { await attachFolder(saved, true); }
+          if (perm === "granted") { await attachFolder(saved, true); return "attached"; }
           else {
             // Show a one-click reconnect in the sidebar status
             var el = document.querySelector("#lib-status");
             if (el) el.innerHTML = "<strong>Your library folder is saved.</strong> Click <strong>Reconnect library folder</strong> below to reopen it (your browser asks once for permission).<br><br>Pick any folder on this computer. Your scripts live in that folder and the app will always open it, even after you close the app.";
             var btn = document.querySelector("#connect-btn");
             if (btn) { btn.dataset.reconnect = "1"; btn.textContent = "Reconnect library folder"; btn.onclick = async function(){ try { var rp = await saved.requestPermission({ mode: "readwrite" }); if (rp === "granted") await attachFolder(saved, false); } catch(e) {} }; }
+            return "needs-permission";
           }
         } catch(e) {}
+        return "none";
       }
 
       /* ================= Export / Import (single file) ================= */
@@ -1656,6 +1696,9 @@
         var _es = $("#expand-sidebar-btn"); if (_es) _es.addEventListener("click", function(){ layoutState.sidebarCollapsed=false; saveLayout(); applyLayout(); });
         var _el = $("#expand-list-btn"); if (_el) _el.addEventListener("click", function(){ layoutState.listCollapsed=false; saveLayout(); applyLayout(); });
         var _ec = $("#empty-connect-btn"); if (_ec) _ec.addEventListener("click", connectFolder);
+        var _wc = $("#welcome-create"); if (_wc) _wc.addEventListener("click", async function(){ if (await connectFolder()) hideWelcome(); });
+        var _wo = $("#welcome-open"); if (_wo) _wo.addEventListener("click", async function(){ if (await connectFolder()) hideWelcome(); });
+        var _ws = $("#welcome-skip"); if (_ws) _ws.addEventListener("click", hideWelcome);
         document.addEventListener("keydown", function(e){
           if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === "b") { e.preventDefault(); toggleList(); }
           else if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === "b") { e.preventDefault(); toggleSidebar(); }
@@ -1725,7 +1768,9 @@
       syncSettingsUI();
       applySettings();
       renderAll();
-      restoreSavedFolder();
+      restoreSavedFolder().then(function (status) {
+        if (status === "none" && !dirHandle) showWelcome();
+      });
     </script>
   </body>
 </html>
