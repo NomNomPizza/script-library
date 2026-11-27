@@ -4,6 +4,7 @@
 const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
 const https = require('https');
 const crypto = require('crypto');
 const { spawn } = require('child_process');
@@ -364,6 +365,139 @@ function writeSettings(patch) {
   return next;
 }
 
+/* ---------- Safe Sync (v1.7.0) ----------
+   Three layers that make a synced library folder safe to open on two
+   computers at once:
+   1. Edit locks: opening a script drops a small lock file into
+      <library>/.locks/ with a heartbeat. A second copy of the app that
+      finds a fresh lock opens the script read-only instead of letting
+      two editors race. Locks go stale after 45s without a heartbeat
+      (crash, sleep, lost connection), so nobody can lock themselves out.
+   2. Live reload: this process watches the library's scripts folder.
+      Changes that arrive from the other computer (through Drive) are
+      reported to the renderer, which reloads clean scripts in place.
+      Writes this app makes itself are recognized by content hash and
+      never reported back as "external".
+   3. Conflict copies: enforced in the renderer (see app/index.html);
+      the watcher and the per-file baselines here are what make the
+      collisions detectable. */
+
+const LOCK_STALE_MS = 45000;
+
+function hashBuffer(buf) {
+  return crypto.createHash('sha1').update(buf).digest('hex');
+}
+
+const selfWrites = new Map();   // resolved file path -> sha1 of last own write
+
+function syncIdentity() {
+  const s = readSettings();
+  if (!s.instanceId) writeSettings({ instanceId: crypto.randomUUID() });
+  const cur = readSettings();
+  return { instanceId: cur.instanceId, machine: os.hostname() || 'This computer' };
+}
+
+function lockFilePath(root, scriptId) {
+  return path.join(root, '.locks', scriptId + '.json');
+}
+
+function readLock(root, scriptId) {
+  try { return JSON.parse(fs.readFileSync(lockFilePath(root, scriptId), 'utf8')); }
+  catch { return null; }
+}
+
+function lockIsFresh(lock) {
+  return !!lock && (Date.now() - (lock.heartbeat || 0)) <= LOCK_STALE_MS;
+}
+
+function writeLock(root, scriptId, lock) {
+  const p = lockFilePath(root, scriptId);
+  fs.mkdirSync(path.dirname(p), { recursive: true });
+  fs.writeFileSync(p, JSON.stringify(lock, null, 2));
+}
+
+/* ---- library watcher ---- */
+let watchRoot = null;
+let watchHandles = [];
+let watchBaseline = new Map();  // scriptId -> sha1 of file content at last scan
+let watchLibraryHash = null;    // sha1 of library.json at last scan
+let watchTimer = null;
+
+async function scanLibrary(root) {
+  const scripts = new Map();
+  let libraryHash = null;
+  try {
+    const dir = path.join(root, 'scripts');
+    const names = await fs.promises.readdir(dir);
+    for (const name of names) {
+      if (!name.endsWith('.json')) continue;
+      try {
+        const buf = await fs.promises.readFile(path.join(dir, name));
+        scripts.set(name.slice(0, -5), hashBuffer(buf));
+      } catch { /* file mid-sync; the next scan catches it */ }
+    }
+  } catch { /* no scripts folder yet */ }
+  try {
+    libraryHash = hashBuffer(await fs.promises.readFile(path.join(root, 'library.json')));
+  } catch { /* no index yet */ }
+  return { scripts, libraryHash };
+}
+
+async function rescanLibrary() {
+  if (!watchRoot) return;
+  const root = watchRoot;
+  const { scripts, libraryHash } = await scanLibrary(root);
+  if (root !== watchRoot) return; // watcher moved on mid-scan
+  const changed = [], added = [], deleted = [];
+  for (const [id, hash] of scripts) {
+    if (!watchBaseline.has(id)) {
+      // A brand-new file counts as "added" only when it is not one this
+      // app just wrote itself (a new script's first flush).
+      const p = path.resolve(path.join(root, 'scripts', id + '.json'));
+      if (selfWrites.get(p) !== hash) added.push(id);
+    } else if (watchBaseline.get(id) !== hash) {
+      const p = path.resolve(path.join(root, 'scripts', id + '.json'));
+      if (selfWrites.get(p) !== hash) changed.push(id);
+    }
+  }
+  for (const id of watchBaseline.keys()) {
+    if (!scripts.has(id)) deleted.push(id);
+  }
+  const libraryChanged = watchLibraryHash !== null && libraryHash !== null && watchLibraryHash !== libraryHash
+    && selfWrites.get(path.resolve(path.join(root, 'library.json'))) !== libraryHash;
+  watchBaseline = scripts;
+  if (libraryHash !== null) watchLibraryHash = libraryHash;
+  if ((changed.length || added.length || deleted.length || libraryChanged) && mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('sync:external', { changed, added, deleted, libraryChanged });
+  }
+}
+
+function scheduleRescan() {
+  if (watchTimer) clearTimeout(watchTimer);
+  watchTimer = setTimeout(() => { rescanLibrary().catch(() => {}); }, 700);
+}
+
+async function startWatch(root) {
+  stopWatch();
+  watchRoot = root;
+  const { scripts, libraryHash } = await scanLibrary(root);
+  watchBaseline = scripts;
+  watchLibraryHash = libraryHash;
+  const onEvent = () => scheduleRescan();
+  try { watchHandles.push(fs.watch(root, onEvent)); } catch { /* folder may not exist yet */ }
+  try { watchHandles.push(fs.watch(path.join(root, 'scripts'), onEvent)); } catch { /* ditto */ }
+  for (const h of watchHandles) h.on('error', () => {});
+}
+
+function stopWatch() {
+  for (const h of watchHandles) { try { h.close(); } catch { /* already closed */ } }
+  watchHandles = [];
+  watchRoot = null;
+  watchBaseline = new Map();
+  watchLibraryHash = null;
+  if (watchTimer) { clearTimeout(watchTimer); watchTimer = null; }
+}
+
 function createWindow() {
   const win = new BrowserWindow({
     width: 1320,
@@ -421,7 +555,12 @@ app.whenReady().then(() => {
 
   ipcMain.handle('fs:write', async (_e, filePath, arrayBuffer) => {
     await fs.promises.mkdir(path.dirname(filePath), { recursive: true });
-    await fs.promises.writeFile(filePath, Buffer.from(arrayBuffer));
+    const buf = Buffer.from(arrayBuffer);
+    await fs.promises.writeFile(filePath, buf);
+    // Remember the hash of everything this app writes itself, so the
+    // library watcher can tell its own saves apart from changes that
+    // arrive from another computer through the synced folder.
+    selfWrites.set(path.resolve(filePath), hashBuffer(buf));
   });
 
   ipcMain.handle('fs:mkdir', async (_e, dirPath) => {
@@ -521,6 +660,72 @@ app.whenReady().then(() => {
     }
     return { ok: true };
   });
+
+  // ---- Safe Sync: identity, edit locks, library watcher ----
+  ipcMain.handle('sync:getIdentity', () => syncIdentity());
+
+  ipcMain.handle('sync:lockAcquire', (_e, root, scriptId, meta, force) => {
+    const me = syncIdentity();
+    const existing = readLock(root, scriptId);
+    if (existing && existing.instanceId !== me.instanceId && lockIsFresh(existing) && !force) {
+      return { ok: false, holder: { machine: existing.machine || 'another computer', since: existing.since || null } };
+    }
+    const lock = {
+      scriptId,
+      instanceId: me.instanceId,
+      machine: me.machine,
+      title: (meta && meta.title) || '',
+      since: existing && existing.instanceId === me.instanceId ? (existing.since || Date.now()) : Date.now(),
+      heartbeat: Date.now()
+    };
+    try { writeLock(root, scriptId, lock); } catch { return { ok: false, holder: null }; }
+    return { ok: true };
+  });
+
+  ipcMain.handle('sync:lockHeartbeat', (_e, root, scriptId) => {
+    const me = syncIdentity();
+    const existing = readLock(root, scriptId);
+    if (!existing || existing.instanceId !== me.instanceId) return false;
+    existing.heartbeat = Date.now();
+    try { writeLock(root, scriptId, existing); } catch { return false; }
+    return true;
+  });
+
+  ipcMain.handle('sync:lockRelease', (_e, root, scriptId) => {
+    const me = syncIdentity();
+    const existing = readLock(root, scriptId);
+    if (existing && existing.instanceId === me.instanceId) {
+      try { fs.unlinkSync(lockFilePath(root, scriptId)); } catch { /* already gone */ }
+    }
+    return true;
+  });
+
+  ipcMain.handle('sync:lockStatus', (_e, root, scriptId) => {
+    const me = syncIdentity();
+    const existing = readLock(root, scriptId);
+    if (!existing) return { locked: false, mine: false, stale: false, holder: null };
+    const mine = existing.instanceId === me.instanceId;
+    const fresh = lockIsFresh(existing);
+    return {
+      locked: fresh && !mine,
+      mine,
+      stale: !fresh,
+      holder: mine ? null : { machine: existing.machine || 'another computer', since: existing.since || null }
+    };
+  });
+
+  // Best-effort instant lock release when the window closes: the preload
+  // sends this on beforeunload, where async invoke handlers may not run.
+  ipcMain.on('sync:lockReleaseSync', (_e, root, scriptId) => {
+    try {
+      const me = syncIdentity();
+      const existing = readLock(root, scriptId);
+      if (existing && existing.instanceId === me.instanceId) fs.unlinkSync(lockFilePath(root, scriptId));
+    } catch { /* stale timeout is the backstop */ }
+  });
+
+  ipcMain.handle('sync:watchStart', async (_e, root) => { await startWatch(root); return true; });
+  ipcMain.handle('sync:watchStop', () => { stopWatch(); return true; });
 
   ipcMain.handle('app:getVersion', () => app.getVersion());
 

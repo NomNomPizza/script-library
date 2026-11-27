@@ -154,6 +154,43 @@ window.scriptLibraryNative = {
   async mirrorBackup(payload) {
     return ipcRenderer.invoke('backup:mirror', payload);
   },
+  // ---- Safe Sync bridge (edit locks + library watcher) ----
+  // The lock this window currently holds, remembered here so beforeunload
+  // can release it with a fire-and-forget send (invoke may not complete
+  // while the window is tearing down).
+  _heldLock: null,
+  async getSyncIdentity() {
+    return ipcRenderer.invoke('sync:getIdentity');
+  },
+  async watchStart(handle) {
+    if (!handle || !handle._path) return false;
+    return ipcRenderer.invoke('sync:watchStart', handle._path);
+  },
+  async watchStop() {
+    return ipcRenderer.invoke('sync:watchStop');
+  },
+  async lockAcquire(handle, scriptId, title, force) {
+    if (!handle || !handle._path) return { ok: false, holder: null };
+    const res = await ipcRenderer.invoke('sync:lockAcquire', handle._path, scriptId, { title: title || '' }, !!force);
+    if (res && res.ok) this._heldLock = { root: handle._path, scriptId };
+    return res;
+  },
+  async lockHeartbeat(handle, scriptId) {
+    if (!handle || !handle._path) return false;
+    return ipcRenderer.invoke('sync:lockHeartbeat', handle._path, scriptId);
+  },
+  async lockRelease(handle, scriptId) {
+    if (this._heldLock && this._heldLock.scriptId === scriptId) this._heldLock = null;
+    if (!handle || !handle._path) return false;
+    return ipcRenderer.invoke('sync:lockRelease', handle._path, scriptId);
+  },
+  async lockStatus(handle, scriptId) {
+    if (!handle || !handle._path) return { locked: false, mine: false, stale: true, holder: null };
+    return ipcRenderer.invoke('sync:lockStatus', handle._path, scriptId);
+  },
+  onExternalChange(cb) {
+    ipcRenderer.on('sync:external', (_e, evt) => cb(evt));
+  },
   // ---- auto-update bridge (main process owns electron-updater) ----
   async getVersion() {
     return ipcRenderer.invoke('app:getVersion');
@@ -174,5 +211,16 @@ window.scriptLibraryNative = {
     ipcRenderer.on('updates:status', (_e, state) => cb(state));
   }
 };
+
+// Release the held edit lock the moment the window goes away, using a
+// synchronous-style send: async invokes are not guaranteed to complete
+// during unload, and a stranded lock would block the other computer
+// until it goes stale (45s).
+window.addEventListener('beforeunload', () => {
+  const held = window.scriptLibraryNative && window.scriptLibraryNative._heldLock;
+  if (held) {
+    try { ipcRenderer.send('sync:lockReleaseSync', held.root, held.scriptId); } catch { /* stale timeout covers it */ }
+  }
+});
 
 window.__scriptLibraryStandalone = true;

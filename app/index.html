@@ -286,6 +286,18 @@
       .tool-btn:hover { background: var(--hover-bg); color: var(--ink); }
       .tool-btn.wide { font-size: 12.5px; font-weight: 600; color: var(--show-blue); }
       .tool-sep { width: 1px; height: 22px; background: var(--line); margin: 0 5px; flex: none; }
+      /* Safe Sync: read-only banner shown when the other computer holds
+         the edit lock for the open script */
+      #lock-banner {
+        display: none; align-items: center; gap: 10px; flex-wrap: wrap;
+        margin: 14px auto 0; max-width: 860px; width: calc(100% - 68px);
+        padding: 10px 14px; border: 1px solid var(--line); border-radius: 10px;
+        background: var(--surface); color: var(--ink-2); font-size: 13.5px;
+      }
+      #lock-banner.open { display: flex; }
+      #lock-banner .grow { flex: 1; min-width: 200px; }
+      #ed-main.readonly .toolbar { opacity: .45; pointer-events: none; }
+      #ed-main.readonly #ed-title, #ed-main.readonly #ed-body { opacity: .85; }
       .ed-scroll { overflow-y: auto; flex: 1; min-height: 0; }
       #ed-body {
         max-width: 860px; margin: 0 auto; padding: 20px 34px 120px;
@@ -499,6 +511,10 @@
           <button class="btn" id="empty-connect-btn" style="margin-top:4px">Choose library folder…</button>
         </div>
         <div id="ed-main" style="display:none;flex-direction:column;min-height:0;flex:1">
+          <div id="lock-banner" role="status">
+            <span class="grow" id="lock-banner-text"></span>
+            <button class="btn" id="lock-takeover-btn" style="min-height:34px">Take over editing</button>
+          </div>
           <div class="ed-head">
             <div class="ed-toprow">
               <button class="icon-btn mobile-only" id="back-btn" aria-label="Back to script list"></button>
@@ -615,6 +631,25 @@
       var lastExportAt = 0;
       var flushTimer = null;
       var sessionEdited = false;   // any edit made while no folder connected
+      /* Safe Sync state (standalone app + folder connected only) */
+      var diskBaseline = {};       // scriptId -> hash of the file content we last read or wrote
+      var syncIdentity = null;     // { instanceId, machine } for this install
+      var heldLockId = null;       // scriptId this window holds the edit lock for
+      var readOnlyId = null;       // scriptId currently open read-only
+      var readOnlyHolder = null;   // { machine, since } holding readOnlyId's lock
+      var lockTimer = null;        // heartbeat interval
+      var syncWired = false;       // external-change listener registered once
+      function textHash(str) {
+        var h1 = 0xdeadbeef, h2 = 0x41c6ce57, s = String(str == null ? "" : str);
+        for (var i = 0; i < s.length; i++) {
+          var ch = s.charCodeAt(i);
+          h1 = Math.imul(h1 ^ ch, 2654435761);
+          h2 = Math.imul(h2 ^ ch, 1597334677);
+        }
+        h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+        h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+        return (h2 >>> 0).toString(16) + (h1 >>> 0).toString(16) + ":" + s.length;
+      }
 
       function uid() {
         return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
@@ -993,7 +1028,10 @@
           '<span class="rt">' + fmtReadTime(words) + " read</span>" +
           "<span>" + words.toLocaleString() + " words</span>" +
           "<span>Edited " + fmtFullDate(s.updatedAt) + "</span>";
-        $("#ed-folder-sel").addEventListener("change", function (e) {
+        var folderSelEl = $("#ed-folder-sel");
+        if (editingLocked()) folderSelEl.disabled = true;
+        folderSelEl.addEventListener("change", function (e) {
+          if (editingLocked()) return;
           s.folderId = e.target.value || null;
           s.updatedAt = Date.now();
           markDirty(s.id);
@@ -1032,7 +1070,11 @@
         state.selectedId = id;
         renderList();
         renderEditor();
+        applyLockUI();
         if (showOnMobile) document.getElementById("app").classList.add("show-editor");
+        // Safe Sync: claim the edit lock for the newly opened script (or
+        // discover that the other computer holds it and go read-only).
+        if (id) acquireLockFor(id, false);
       }
       function closeSidebarMobile() {
         document.getElementById("app").classList.remove("show-sidebar");
@@ -1188,6 +1230,7 @@
         return box.innerHTML;
       }
       function syncBodyFromEditor() {
+        if (editingLocked()) return;
         var s = scriptById(state.selectedId);
         if (!s) return;
         var bodyEl = $("#ed-body");
@@ -1204,6 +1247,7 @@
       function wireEditor() {
         var titleEl = $("#ed-title"), bodyEl = $("#ed-body");
         titleEl.addEventListener("input", function () {
+          if (editingLocked()) return;
           var s = scriptById(state.selectedId);
           if (!s) return;
           s.title = titleEl.textContent.replace(/\s+/g, " ").trim();
@@ -1292,13 +1336,30 @@
           var ids = Object.keys(dirtyScripts);
           for (var i = 0; i < ids.length; i++) {
             var s = scriptById(ids[i]);
-            if (s) await writeTextFile(scriptsDir, s.id + ".json", scriptFileJSON(s));
+            if (s) {
+              // Safe Sync, layer 3: if the file on disk no longer matches
+              // what we last read or wrote, the other computer saved its
+              // own version in the meantime. Preserve that version as a
+              // conflict copy before our save overwrites it, so neither
+              // version is ever lost.
+              if (diskBaseline[s.id]) {
+                var diskText = null;
+                try { diskText = await readTextFile(scriptsDir, s.id + ".json"); } catch (e) { diskText = null; }
+                if (diskText !== null && textHash(diskText) !== diskBaseline[s.id] && textHash(diskText) !== textHash(scriptFileJSON(s))) {
+                  try { addConflictCopy(JSON.parse(diskText), "the other computer"); } catch (e) { /* unreadable disk copy; our save still proceeds */ }
+                }
+              }
+              var json = scriptFileJSON(s);
+              await writeTextFile(scriptsDir, s.id + ".json", json);
+              diskBaseline[s.id] = textHash(json);
+            }
             delete dirtyScripts[ids[i]];
           }
           var dels = Object.keys(deletedScriptIds);
           for (var j = 0; j < dels.length; j++) {
             try { await scriptsDir.removeEntry(dels[j] + ".json"); } catch (e) { /* already gone */ }
             delete deletedScriptIds[dels[j]];
+            delete diskBaseline[dels[j]];
           }
           if (libraryDirty) {
             await writeTextFile(dirHandle, "library.json", libraryIndexJSON());
@@ -1350,6 +1411,237 @@
         var when = lastMirrorAt ? (" Last updated " + new Date(lastMirrorAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) + ".") : " It updates automatically every time you save.";
         return "On — mirroring to \u201C" + backupInfo.name + "\u201D." + when;
       }
+      /* ================= Safe Sync (standalone app only) =================
+         Layer 1: edit locks. Opening a script asks the main process for
+         its lock (a heartbeat file in <library>/.locks/). Whoever holds
+         it edits; the other computer opens the script read-only.
+         Layer 2: live reload. The main process watches the scripts
+         folder; changes arriving from the other computer reload clean
+         scripts in place.
+         Layer 3: conflict copies. If both sides somehow end up with
+         different versions of the same script, the version that would
+         be overwritten is preserved as a new script whose title says
+         "conflict copy", so nothing is ever silently lost. */
+      function syncBridge() {
+        var nb = nativeBridge();
+        return nb && nb.lockAcquire && nb.watchStart ? nb : null;
+      }
+      function editingLocked() { return !!(state.selectedId && readOnlyId === state.selectedId); }
+      function addConflictCopy(raw, sourceLabel) {
+        if (!raw) return null;
+        var now = Date.now();
+        var copy = {
+          id: uid(),
+          title: (raw.title || "Untitled script") + " (conflict copy, " + sourceLabel + ")",
+          folderId: raw.folderId || null,
+          favorite: false,
+          createdAt: now,
+          updatedAt: raw.updatedAt || now,
+          body: raw.body || ""
+        };
+        state.scripts.unshift(copy);
+        markDirty(copy.id);
+        try { renderAll(); } catch (e) { /* rendering must never block saving */ }
+        return copy;
+      }
+      async function readScriptFromDisk(id) {
+        if (!dirHandle) return null;
+        try {
+          var scriptsDir = await dirHandle.getDirectoryHandle("scripts");
+          var text = await readTextFile(scriptsDir, id + ".json");
+          var raw = JSON.parse(text);
+          if (!raw || !raw.id) return null;
+          return { raw: raw, text: text };
+        } catch (e) { return null; }
+      }
+      function adoptDiskScript(disk) {
+        var s = scriptById(disk.raw.id);
+        if (!s) return false;
+        s.title = disk.raw.title || s.title;
+        s.folderId = disk.raw.folderId || null;
+        s.favorite = !!disk.raw.favorite;
+        s.createdAt = disk.raw.createdAt || s.createdAt;
+        s.updatedAt = disk.raw.updatedAt || s.updatedAt;
+        s.body = disk.raw.body || "";
+        delete dirtyScripts[s.id];
+        diskBaseline[s.id] = textHash(disk.text);
+        return true;
+      }
+      function applyLockUI() {
+        var main = $("#ed-main"), banner = $("#lock-banner"), txt = $("#lock-banner-text");
+        if (!main || !banner) return;
+        var ro = editingLocked();
+        main.classList.toggle("readonly", ro);
+        banner.classList.toggle("open", ro);
+        if (ro && txt) {
+          var who = readOnlyHolder && readOnlyHolder.machine ? readOnlyHolder.machine : "another computer";
+          txt.textContent = "This script is open for editing on " + who + " right now, so here it is read-only. Changes made there still appear here live. Take over only once you are done writing over there.";
+        }
+        var titleEl = $("#ed-title"), bodyEl = $("#ed-body");
+        if (titleEl) titleEl.contentEditable = ro ? "false" : "true";
+        if (bodyEl) bodyEl.contentEditable = ro ? "false" : "true";
+        ["#fav-btn", "#del-btn", "#tpl-btn"].forEach(function (sel) {
+          var b = $(sel);
+          if (b) { b.style.opacity = ro ? ".4" : ""; b.style.pointerEvents = ro ? "none" : ""; }
+        });
+      }
+      async function acquireLockFor(id, force) {
+        var nb = syncBridge();
+        if (!nb || !dirHandle || !id) return;
+        if (heldLockId && heldLockId !== id) {
+          var prev = heldLockId; heldLockId = null;
+          try { await nb.lockRelease(dirHandle, prev); } catch (e) { /* stale timeout is the backstop */ }
+        }
+        if (readOnlyId && readOnlyId !== id) { readOnlyId = null; readOnlyHolder = null; }
+        var s = scriptById(id);
+        var res = null;
+        try { res = await nb.lockAcquire(dirHandle, id, s ? s.title : "", !!force); } catch (e) { res = null; }
+        if (!res) { applyLockUI(); return; }
+        if (res.ok) {
+          heldLockId = id;
+          if (readOnlyId === id) { readOnlyId = null; readOnlyHolder = null; }
+        } else {
+          if (heldLockId === id) heldLockId = null;
+          readOnlyId = id;
+          readOnlyHolder = res.holder || null;
+        }
+        applyLockUI();
+      }
+      async function takeOverEditing() {
+        var id = state.selectedId;
+        if (!id || readOnlyId !== id) return;
+        var disk = await readScriptFromDisk(id);
+        if (disk) { adoptDiskScript(disk); renderAll(); }
+        await acquireLockFor(id, true);
+        if (heldLockId === id) toast("You are editing this script now. If the other computer had unsaved changes, they will be kept there as a conflict copy.");
+      }
+      async function handleLockLost() {
+        var id = heldLockId; heldLockId = null;
+        if (!id) return;
+        var s = scriptById(id);
+        var hadUnsaved = !!(s && dirtyScripts[id]);
+        if (hadUnsaved) {
+          addConflictCopy({ title: s.title, folderId: s.folderId, body: s.body, updatedAt: s.updatedAt }, "unsaved here when the other computer took over");
+          delete dirtyScripts[id];
+          var disk = await readScriptFromDisk(id);
+          if (disk) adoptDiskScript(disk);
+        }
+        var nb = syncBridge();
+        var st = null;
+        try { st = nb ? await nb.lockStatus(dirHandle, id) : null; } catch (e) { /* holder unknown */ }
+        readOnlyId = id;
+        readOnlyHolder = st && st.holder ? st.holder : null;
+        if (state.selectedId === id) renderAll();
+        applyLockUI();
+        toast(hadUnsaved
+          ? "The other computer took over this script. Your unsaved changes were kept as a conflict copy."
+          : "The other computer took over editing this script, so it is read-only here now.");
+      }
+      function startLockHeartbeat() {
+        if (lockTimer) return;
+        lockTimer = setInterval(async function () {
+          var nb = syncBridge();
+          if (!nb || !dirHandle) return;
+          if (heldLockId) {
+            var ok = false;
+            try { ok = await nb.lockHeartbeat(dirHandle, heldLockId); } catch (e) { ok = false; }
+            if (!ok) handleLockLost();
+          } else if (readOnlyId) {
+            var st = null;
+            try { st = await nb.lockStatus(dirHandle, readOnlyId); } catch (e) { /* retry next beat */ }
+            if (st && !st.locked) {
+              var id = readOnlyId;
+              readOnlyId = null; readOnlyHolder = null;
+              await acquireLockFor(id, false);
+              if (heldLockId === id) toast("The other computer closed this script, so you can edit it here now.");
+            }
+          }
+        }, 10000);
+      }
+      async function onExternalChange(evt) {
+        if (!dirHandle || !evt) return;
+        var changedAny = false;
+        var added = evt.added || [], changed = evt.changed || [], deleted = evt.deleted || [];
+        for (var a = 0; a < added.length; a++) {
+          var addId = added[a];
+          if (scriptById(addId) || deletedScriptIds[addId]) continue;
+          var addDisk = await readScriptFromDisk(addId);
+          if (addDisk) {
+            state.scripts.unshift({
+              id: addDisk.raw.id, title: addDisk.raw.title || "Untitled script",
+              folderId: addDisk.raw.folderId || null, favorite: !!addDisk.raw.favorite,
+              createdAt: addDisk.raw.createdAt || Date.now(), updatedAt: addDisk.raw.updatedAt || Date.now(),
+              body: addDisk.raw.body || ""
+            });
+            diskBaseline[addId] = textHash(addDisk.text);
+            changedAny = true;
+          }
+        }
+        for (var c = 0; c < changed.length; c++) {
+          var chId = changed[c];
+          var local = scriptById(chId);
+          if (!local) continue;
+          var chDisk = await readScriptFromDisk(chId);
+          if (!chDisk) continue;
+          if (diskBaseline[chId] && textHash(chDisk.text) === diskBaseline[chId]) continue;
+          if (dirtyScripts[chId]) {
+            addConflictCopy(chDisk.raw, "the other computer");
+            diskBaseline[chId] = textHash(chDisk.text);
+            toast("A different version of \u201C" + (local.title || "Untitled script") + "\u201D arrived from your other computer. It was kept as a conflict copy, so nothing was lost.");
+          } else {
+            adoptDiskScript(chDisk);
+            changedAny = true;
+            toast("\u201C" + (local.title || "Untitled script") + "\u201D updated from your other computer.");
+          }
+        }
+        for (var d = 0; d < deleted.length; d++) {
+          var delId = deleted[d];
+          var delLocal = scriptById(delId);
+          if (!delLocal) { delete diskBaseline[delId]; continue; }
+          if (dirtyScripts[delId]) {
+            delete diskBaseline[delId];
+            toast("\u201C" + (delLocal.title || "Untitled script") + "\u201D was deleted on your other computer, but you have unsaved changes here, so your copy was kept.");
+          } else {
+            state.scripts = state.scripts.filter(function (x) { return x.id !== delId; });
+            delete diskBaseline[delId];
+            if (state.selectedId === delId) {
+              if (heldLockId === delId) heldLockId = null;
+              if (readOnlyId === delId) { readOnlyId = null; readOnlyHolder = null; }
+              state.selectedId = state.scripts.length ? state.scripts[0].id : null;
+              if (state.selectedId) acquireLockFor(state.selectedId, false);
+            }
+            changedAny = true;
+            toast("\u201C" + (delLocal.title || "Untitled script") + "\u201D was deleted on your other computer.");
+          }
+        }
+        if (evt.libraryChanged && !libraryDirty) {
+          try {
+            var idx = JSON.parse(await readTextFile(dirHandle, "library.json"));
+            if (idx) {
+              if (Array.isArray(idx.folders)) state.folders = idx.folders;
+              if (Array.isArray(idx.templates)) state.templates = idx.templates;
+              changedAny = true;
+            }
+          } catch (e) { /* index mid-sync; the next change event catches it */ }
+        }
+        if (changedAny) renderAll();
+        applyLockUI();
+      }
+      async function initSafeSync() {
+        var nb = syncBridge();
+        if (!nb || !dirHandle) return;
+        try { syncIdentity = await nb.getSyncIdentity(); } catch (e) { /* locks still work without the label */ }
+        try { await nb.watchStart(dirHandle); } catch (e) { /* live reload is best-effort */ }
+        if (!syncWired) {
+          syncWired = true;
+          nb.onExternalChange(function (evt) { onExternalChange(evt); });
+          var tb = $("#lock-takeover-btn");
+          if (tb) tb.addEventListener("click", takeOverEditing);
+        }
+        startLockHeartbeat();
+        if (state.selectedId) acquireLockFor(state.selectedId, false);
+      }
+
       async function loadLibraryFromFolder(handle) {
         var index = null;
         try { index = JSON.parse(await readTextFile(handle, "library.json")); } catch (e) { index = null; }
@@ -1365,10 +1657,12 @@
           }
         }
         var scripts = [];
+        diskBaseline = {};
         if (scriptsDir) {
           for (var i = 0; i < ids.length; i++) {
             try {
-              var raw = JSON.parse(await readTextFile(scriptsDir, ids[i] + ".json"));
+              var fileText = await readTextFile(scriptsDir, ids[i] + ".json");
+              var raw = JSON.parse(fileText);
               if (raw && raw.id) {
                 scripts.push({
                   id: raw.id, title: raw.title || "Untitled script",
@@ -1376,6 +1670,7 @@
                   createdAt: raw.createdAt || Date.now(), updatedAt: raw.updatedAt || Date.now(),
                   body: raw.body || ""
                 });
+                diskBaseline[raw.id] = textHash(fileText);
               }
             } catch (e) { /* skip unreadable script file */ }
           }
@@ -1408,6 +1703,7 @@
         }
         applySettings(); syncSettingsUI(); renderAll();
         initBackupMirror();
+        initSafeSync();
         return true;
       }
       async function connectFolder() {
@@ -1436,6 +1732,14 @@
       async function disconnectFolder() {
         var nb = nativeBridge();
         if (nb) { try { await nb.clearSavedFolder(); } catch(e) {} }
+        // Safe Sync: hand back the edit lock and stop watching before the
+        // folder handle goes away.
+        var sb = syncBridge();
+        if (sb && dirHandle) {
+          if (heldLockId) { try { await sb.lockRelease(dirHandle, heldLockId); } catch(e) {} heldLockId = null; }
+          readOnlyId = null; readOnlyHolder = null;
+          try { await sb.watchStop(); } catch(e) {}
+        }
         await idbDel("dirHandle");
         dirHandle = null; dirName = "";
         renderAll();
@@ -1747,6 +2051,7 @@
           "<li>On your other computer, open this app, hit <strong>Connect library folder</strong>, and pick the same synced folder. Your whole library loads.</li>" +
           "<li>Write on whichever machine you like. Just let Drive finish syncing before switching, so the newest files land first.</li>" +
           "</ol>" +
+          "<p><strong>Safe Sync (desktop app):</strong> if the same library is open on two computers, the app protects you three ways. The script you are editing is <strong>locked</strong> on the other computer (it opens read-only there) until you close it or switch scripts. Changes from the other computer <strong>appear live</strong> in scripts you are not editing. And if two versions of a script ever collide, neither is thrown away: the extra one is kept in your library as a <strong>conflict copy</strong> so you can pick the winner yourself.</p>" +
           "<p><strong>No folder access?</strong> In browsers without folder picking, use Export and Import instead: Export downloads the entire library as one file, which you can keep in Drive and Import on the other machine.</p>" +
           "<p><strong>Read times</strong> are estimated from word count at your speaking pace. Change the pace in Settings; slower narration, lower number.</p>",
           [{ label: "Done", primary: true }]
